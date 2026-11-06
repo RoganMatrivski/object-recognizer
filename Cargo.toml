@@ -1,7 +1,7 @@
 [workspace]
 members = [
     ".",
-    "bin", "subcrates/subject-cutout","subcrates/vecdb",
+    "bin", "subcrates/feature-extraction", "subcrates/subject-cutout","subcrates/vecdb",
 ]
 
 [package]
@@ -13,6 +13,7 @@ edition = "2024"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
+object-recognizer-feature-extraction = { version = "0.1.0", path = "subcrates/feature-extraction" }
 object-recognizer-subject-cutout = { version = "0.1.0", path = "subcrates/subject-cutout" }
 object-recognizer-vecdb = { version = "0.1.0", path = "subcrates/vecdb" }
 

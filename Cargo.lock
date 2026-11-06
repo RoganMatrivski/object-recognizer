@@ -2311,6 +2311,7 @@ dependencies = [
 name = "object-recognizer"
 version = "0.1.0"
 dependencies = [
+ "object-recognizer-feature-extraction",
  "object-recognizer-subject-cutout",
  "object-recognizer-vecdb",
 ]
@@ -2328,6 +2329,17 @@ dependencies = [
  "tracing",
  "tracing-error",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "object-recognizer-feature-extraction"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "imageproc",
+ "ndarray",
+ "ort",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
