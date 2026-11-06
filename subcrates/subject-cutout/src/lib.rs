@@ -57,6 +57,20 @@ impl Segmenter {
         self.model
     }
 
+    #[cfg(any(feature = "embed-u2net", feature = "embed-u2netp"))]
+    pub fn new(model: Model) -> Result<Self> {
+        match model {
+            #[cfg(feature = "embed-u2net")]
+            Model::U2Net => Self::from_bytes(Model::U2Net, include_bytes!("../models/u2net.onnx")),
+            #[cfg(feature = "embed-u2netp")]
+            Model::U2NetP => {
+                Self::from_bytes(Model::U2NetP, include_bytes!("../models/u2netp.onnx"))
+            }
+            #[allow(unreachable_patterns)]
+            _ => Err(Error::NotEmbedded(model)),
+        }
+    }
+
     /// Raw saliency map at model resolution (INPUT_SIZE x INPUT_SIZE), 0..=255.
     pub fn mask_small(&mut self, img: &DynamicImage) -> Result<GrayImage> {
         let small = img

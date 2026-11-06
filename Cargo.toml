@@ -24,8 +24,9 @@ object-recognizer-vecdb = { version = "0.1.0", path = "subcrates/vecdb" }
 [features]
 default = []
 # Embed weights in the binary (files must exist at build time):
-embed-u2net = []    # models/u2net.onnx
-embed-u2netp = []   # models/u2netp.onnx
+embed-u2net = ["object-recognizer-subject-cutout/embed-u2net"]    # models/u2net.onnx
+embed-u2netp = ["object-recognizer-subject-cutout/embed-u2netp"]   # models/u2netp.onnx
+embed-model = ["object-recognizer-feature-extraction/embed-model"]
 
 [profile.dev]
 opt-level = 3       # tract is very slow at opt-level 0
