@@ -1,5 +1,5 @@
 use color_eyre::Report;
-use object_recognizer::Segmenter;
+use object_recognizer::object_recognizer_subject_cutout::Segmenter;
 
 mod init;
 
@@ -18,7 +18,10 @@ fn main() -> Result<(), Report> {
 
     let samples_dir = "D:/fruit-recognizer-py/samples";
 
-    let mut seg = Segmenter::from_path(object_recognizer::Model::U2Net, "../models/u2net.onnx")?;
+    let mut seg = Segmenter::from_path(
+        object_recognizer::object_recognizer_subject_cutout::Model::U2Net,
+        "../models/u2net.onnx",
+    )?;
     // let mut seg = Segmenter::from_path(object_recognizer::Model::U2NetP, "../models/u2netp.onnx")?;
     println!("Loaded model in {:?}", start_total.elapsed());
 

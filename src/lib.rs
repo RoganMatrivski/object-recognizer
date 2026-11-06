@@ -1,5 +1,6 @@
-pub use object_recognizer_subject_cutout::*;
-pub use object_recognizer_vecdb::*;
+pub use object_recognizer_feature_extraction;
+pub use object_recognizer_subject_cutout;
+pub use object_recognizer_vecdb;
 
 // What will the app using this probably need?
 // - search
