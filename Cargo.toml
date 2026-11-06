@@ -1,7 +1,7 @@
 [workspace]
 members = [
     ".",
-    "bin",
+    "bin", "subcrates/object-recognizer-subject-cutout",
 ]
 
 [package]

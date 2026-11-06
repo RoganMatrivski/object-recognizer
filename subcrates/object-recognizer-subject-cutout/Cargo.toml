@@ -1,0 +1,10 @@
+[package]
+name = "object-recognizer-subject-cutout"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ort = { version = "2.0.0-rc.9", default-features = false, features = ["load-dynamic"] }
+thiserror = "1"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+imageproc = { version = "0.27", default-features = false }

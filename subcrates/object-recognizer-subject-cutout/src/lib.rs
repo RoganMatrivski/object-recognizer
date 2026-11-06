@@ -35,19 +35,6 @@ pub enum Model {
     U2NetP,
 }
 
-impl Model {
-    fn embedded_bytes(self) -> Option<&'static [u8]> {
-        match self {
-            #[cfg(feature = "embed-u2net")]
-            Model::U2Net => Some(include_bytes!("../models/u2net.onnx")),
-            #[cfg(feature = "embed-u2netp")]
-            Model::U2NetP => Some(include_bytes!("../models/u2netp.onnx")),
-            #[allow(unreachable_patterns)]
-            _ => None,
-        }
-    }
-}
-
 pub struct Segmenter {
     model: Model,
     session: Session,
@@ -64,13 +51,6 @@ impl Segmenter {
         let env = ort::init().build()?;
         let session = Session::builder(&env)?.commit_from_memory(bytes)?;
         Ok(Self { model, session })
-    }
-
-    pub fn embedded(model: Model) -> Result<Self> {
-        Self::from_bytes(
-            model,
-            model.embedded_bytes().ok_or(Error::NotEmbedded(model))?,
-        )
     }
 
     pub fn model(&self) -> Model {
