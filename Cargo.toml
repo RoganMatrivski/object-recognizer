@@ -4,6 +4,17 @@ members = [
     "bin", "subcrates/feature-extraction", "subcrates/subject-cutout","subcrates/vecdb",
 ]
 
+[workspace.dependencies]
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+imageproc = { version = "0.27", default-features = false }
+ort = { version = "2.0.0-rc.14", default-features = false, features = ["load-dynamic"] }
+thiserror = "1"
+
+object-recognizer = { version = "0.1.0", path = "." }
+object-recognizer-feature-extraction = { version = "0.1.0", path = "subcrates/feature-extraction" }
+object-recognizer-subject-cutout = { version = "0.1.0", path = "subcrates/subject-cutout" }
+object-recognizer-vecdb = { version = "0.1.0", path = "subcrates/vecdb" }
+
 [package]
 name = "object-recognizer"
 version = "0.1.0"
@@ -13,9 +24,9 @@ edition = "2024"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
-object-recognizer-feature-extraction = { version = "0.1.0", path = "subcrates/feature-extraction" }
-object-recognizer-subject-cutout = { version = "0.1.0", path = "subcrates/subject-cutout" }
-object-recognizer-vecdb = { version = "0.1.0", path = "subcrates/vecdb" }
+object-recognizer-feature-extraction = { workspace = true }
+object-recognizer-subject-cutout = { workspace = true }
+object-recognizer-vecdb = { workspace = true }
 
 
 

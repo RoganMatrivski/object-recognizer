@@ -19,17 +19,20 @@ pub struct FeatureExtractor {
 }
 
 impl FeatureExtractor {
-    pub fn new<P: AsRef<Path>>(model_path: P) -> Result<Self, ExtractionError> {
-        let env = ort::init().build()?;
-        let session = Session::builder(&env)?.commit_from_file(model_path)?;
+    pub fn new_with_env(
+        env: &ort::environment::Environment,
+        model_path: impl AsRef<Path>,
+    ) -> Result<Self, ExtractionError> {
+        let session = Session::builder(env)?.commit_from_file(model_path)?;
         Ok(Self { session })
     }
 
     #[cfg(feature = "embed-model")]
-    pub fn new_embedded() -> Result<Self, ExtractionError> {
+    pub fn new_embedded_with_env(
+        env: &ort::environment::Environment,
+    ) -> Result<Self, ExtractionError> {
         const MODEL_BYTES: &[u8] = include_bytes!("../model/mobilenetv3_embedding.onnx");
-        let env = ort::init().build()?;
-        let session = Session::builder(&env)?.commit_from_memory(MODEL_BYTES)?;
+        let session = Session::builder(env)?.commit_from_memory(MODEL_BYTES)?;
         Ok(Self { session })
     }
 
@@ -46,7 +49,7 @@ impl FeatureExtractor {
         }
 
         let input_tensor = Tensor::from_array(([1, 3, 224, 224], data))?;
-        let outputs = self.session.run(ort::inputs!["input" => input_tensor])?;
+        let outputs = self.session.run(ort::inputs!["image" => input_tensor])?;
 
         let (shape, data) = outputs[0].try_extract_tensor::<f32>()?;
 

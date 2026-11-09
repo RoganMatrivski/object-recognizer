@@ -53,8 +53,13 @@ impl Segmenter {
         Ok(Self { model, session })
     }
 
-    pub fn model(&self) -> Model {
-        self.model
+    pub fn new_with_env(
+        model: Model,
+        env: &ort::environment::Environment,
+        build_fn: impl FnOnce(&ort::environment::Environment) -> ort::Result<Session>,
+    ) -> Result<Self> {
+        let session = build_fn(env)?;
+        Ok(Self { model, session })
     }
 
     #[cfg(any(feature = "embed-u2net", feature = "embed-u2netp"))]
