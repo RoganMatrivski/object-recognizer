@@ -1,8 +1,8 @@
 use anyhow::Result;
+use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use qdrant_edge::*;
 pub use qdrant_edge::{Condition, Filter, Match};
-use flate2::{read::GzDecoder, write::GzEncoder, Compression};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     fs::{self, File},
     io::{BufRead, BufReader, BufWriter, Write},
@@ -13,7 +13,7 @@ use std::{
 // ---- Define your schema once, here ----
 pub const DEFAULT_DIR: &str = "./vecdb";
 pub const VECTOR_NAME: &str = "embedding";
-pub const VECTOR_DIM: usize = 384; // match your embedding model
+pub const VECTOR_DIM: usize = 1280; // match your embedding model
 const DISTANCE: Distance = Distance::Cosine;
 /// Identifies the embedding model. Bump/rename it whenever you change the model:
 /// exported files are only importable where this string matches exactly.
@@ -62,22 +62,34 @@ pub fn eq(key: &str, value: impl IntoMatch) -> Result<Condition> {
     let k = key
         .try_into()
         .map_err(|_| anyhow::anyhow!("invalid payload key '{key}'"))?;
-    Ok(Condition::Field(FieldCondition::new_match(k, value.into_match())))
+    Ok(Condition::Field(FieldCondition::new_match(
+        k,
+        value.into_match(),
+    )))
 }
 
 /// All conditions must match (AND).
 pub fn all_of(conds: impl IntoIterator<Item = Condition>) -> Filter {
-    Filter { must: Some(conds.into_iter().collect()), ..Filter::new() }
+    Filter {
+        must: Some(conds.into_iter().collect()),
+        ..Filter::new()
+    }
 }
 
 /// At least one condition must match (OR).
 pub fn any_of(conds: impl IntoIterator<Item = Condition>) -> Filter {
-    Filter { should: Some(conds.into_iter().collect()), ..Filter::new() }
+    Filter {
+        should: Some(conds.into_iter().collect()),
+        ..Filter::new()
+    }
 }
 
 /// None of the conditions may match (NOT).
 pub fn none_of(conds: impl IntoIterator<Item = Condition>) -> Filter {
-    Filter { must_not: Some(conds.into_iter().collect()), ..Filter::new() }
+    Filter {
+        must_not: Some(conds.into_iter().collect()),
+        ..Filter::new()
+    }
 }
 
 fn create_keyword_index(shard: &EdgeShard, key: &str) -> Result<()> {
@@ -156,7 +168,11 @@ impl VecDb {
         };
 
         let next = fs::read_to_string(&id_file)?.trim().parse().unwrap_or(0);
-        Ok(Self { shard, next_id: AtomicU64::new(next), id_file })
+        Ok(Self {
+            shard,
+            next_id: AtomicU64::new(next),
+            id_file,
+        })
     }
 
     pub fn open_default() -> Result<Self> {
@@ -187,7 +203,10 @@ impl VecDb {
             );
         }
         self.upsert_points(points)?;
-        fs::write(&self.id_file, self.next_id.load(Ordering::SeqCst).to_string())?;
+        fs::write(
+            &self.id_file,
+            self.next_id.load(Ordering::SeqCst).to_string(),
+        )?;
         Ok(ids)
     }
 
@@ -258,7 +277,11 @@ impl VecDb {
                 .map(serde_json::to_value)
                 .transpose()?
                 .unwrap_or(serde_json::json!({}));
-            out.push(Hit { id, score: p.score, meta: serde_json::from_value(payload)? });
+            out.push(Hit {
+                id,
+                score: p.score,
+                meta: serde_json::from_value(payload)?,
+            });
         }
         Ok(out)
     }
@@ -290,12 +313,19 @@ impl VecDb {
 
     /// Number of points matching `filter` (exact).
     pub fn count_by_filter(&self, filter: Filter) -> Result<usize> {
-        Ok(self.shard.count(CountRequestBuilder::new().filter(filter).exact(true).build())?)
+        Ok(self.shard.count(
+            CountRequestBuilder::new()
+                .filter(filter)
+                .exact(true)
+                .build(),
+        )?)
     }
 
     /// Total number of points.
     pub fn count(&self) -> Result<usize> {
-        Ok(self.shard.count(CountRequestBuilder::new().exact(true).build())?)
+        Ok(self
+            .shard
+            .count(CountRequestBuilder::new().exact(true).build())?)
     }
 
     /// Adds a keyword index on a metadata field of an existing db (speeds up filters).
@@ -352,7 +382,15 @@ impl VecDb {
                     .map(serde_json::to_value)
                     .transpose()?
                     .unwrap_or(serde_json::json!({}));
-                writeln!(w, "{}", serde_json::to_string(&ExportRow { id, vector, payload })?)?;
+                writeln!(
+                    w,
+                    "{}",
+                    serde_json::to_string(&ExportRow {
+                        id,
+                        vector,
+                        payload
+                    })?
+                )?;
                 n += 1;
             }
             match next {
@@ -372,16 +410,27 @@ impl VecDb {
     /// Returns the number of points imported.
     pub fn import(&self, path: impl AsRef<Path>, mode: ImportMode) -> Result<usize> {
         let mut lines = BufReader::new(GzDecoder::new(File::open(path)?)).lines();
-        let header: ExportHeader =
-            serde_json::from_str(&lines.next().ok_or_else(|| anyhow::anyhow!("empty file"))??)?;
-        anyhow::ensure!(header.format == EXPORT_FORMAT, "unsupported export format {}", header.format);
+        let header: ExportHeader = serde_json::from_str(
+            &lines
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("empty file"))??,
+        )?;
+        anyhow::ensure!(
+            header.format == EXPORT_FORMAT,
+            "unsupported export format {}",
+            header.format
+        );
         anyhow::ensure!(
             header.model == EMBEDDING_MODEL,
             "embedding model mismatch: file '{}' vs local '{}'",
             header.model,
             EMBEDDING_MODEL
         );
-        anyhow::ensure!(header.dim == VECTOR_DIM, "dim mismatch: file {} vs local {VECTOR_DIM}", header.dim);
+        anyhow::ensure!(
+            header.dim == VECTOR_DIM,
+            "dim mismatch: file {} vs local {VECTOR_DIM}",
+            header.dim
+        );
         anyhow::ensure!(
             header.distance == format!("{DISTANCE:?}"),
             "distance mismatch: file {} vs local {DISTANCE:?}",
@@ -423,7 +472,10 @@ impl VecDb {
                 }
                 if let Some(m) = max_id {
                     self.next_id.fetch_max(m + 1, Ordering::SeqCst);
-                    fs::write(&self.id_file, self.next_id.load(Ordering::SeqCst).to_string())?;
+                    fs::write(
+                        &self.id_file,
+                        self.next_id.load(Ordering::SeqCst).to_string(),
+                    )?;
                 }
             }
         }
@@ -445,7 +497,9 @@ impl VecDb {
             let (records, next) = self.shard.scroll(req.build())?;
             let ids: Vec<PointId> = records.into_iter().map(|r| r.id).collect();
             if !ids.is_empty() {
-                self.shard.update(UpdateOperation::PointOperation(PointOperations::DeletePoints { ids }))?;
+                self.shard.update(UpdateOperation::PointOperation(
+                    PointOperations::DeletePoints { ids },
+                ))?;
             }
             match next {
                 Some(o) => offset = Some(o),
@@ -464,6 +518,10 @@ impl VecDb {
 }
 
 fn check_dim(v: &[f32]) -> Result<()> {
-    anyhow::ensure!(v.len() == VECTOR_DIM, "expected dim {VECTOR_DIM}, got {}", v.len());
+    anyhow::ensure!(
+        v.len() == VECTOR_DIM,
+        "expected dim {VECTOR_DIM}, got {}",
+        v.len()
+    );
     Ok(())
 }

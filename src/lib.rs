@@ -1,12 +1,12 @@
-pub use object_recognizer_feature_extraction;
-pub use object_recognizer_subject_cutout;
-pub use object_recognizer_vecdb;
+use object_recognizer_feature_extraction;
+use object_recognizer_subject_cutout;
+use object_recognizer_vecdb;
 
-pub mod ffi;
+use object_recognizer_subject_cutout::{Model, Segmenter};
 
 boltffi::scaffolding!();
 
-pub use object_recognizer_vecdb::{Condition, Filter, Hit};
+pub mod ffi;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -34,12 +34,11 @@ pub struct Recognizer {
 }
 
 impl Recognizer {
-    pub fn new(
-        segmenter_model_path: impl AsRef<std::path::Path>,
+    fn from_parts(
+        env: ort::environment::Environment,
+        seg: Segmenter,
         vecdb_path: impl AsRef<std::path::Path>,
     ) -> Result<Self> {
-        let env = ort::init().build().map_err(Error::Ort)?;
-        let seg = create_segmenter_from_path(&env, segmenter_model_path)?;
         let extractor = create_feature_extractor(&env)?;
         let vecdb = object_recognizer_vecdb::VecDb::open(vecdb_path)?;
         Ok(Self {
@@ -50,8 +49,33 @@ impl Recognizer {
         })
     }
 
+    pub fn new(
+        segmenter_model_path: impl AsRef<std::path::Path>,
+        vecdb_path: impl AsRef<std::path::Path>,
+    ) -> Result<Self> {
+        let env = ort::init().build()?;
+        let seg = create_segmenter_from_path(&env, segmenter_model_path)?;
+        Self::from_parts(env, seg, vecdb_path)
+    }
+
     pub fn new_default(segmenter_model_path: impl AsRef<std::path::Path>) -> Result<Self> {
         Self::new(segmenter_model_path, object_recognizer_vecdb::DEFAULT_DIR)
+    }
+
+    pub fn new_embedded(vecdb_path: impl AsRef<std::path::Path>) -> Result<Self> {
+        let env = ort::init().build()?;
+        let seg = Segmenter::embedded_with_env(Model::U2Net, &env)?;
+        Self::from_parts(env, seg, vecdb_path)
+    }
+
+    pub fn new_embedded_lite(vecdb_path: impl AsRef<std::path::Path>) -> Result<Self> {
+        let env = ort::init().build()?;
+        let seg = Segmenter::embedded_with_env(Model::U2NetP, &env)?;
+        Self::from_parts(env, seg, vecdb_path)
+    }
+
+    pub fn new_embedded_default() -> Result<Self> {
+        Self::new_embedded(object_recognizer_vecdb::DEFAULT_DIR)
     }
 
     pub fn segment_subject(&mut self, img: &image::DynamicImage) -> Result<image::DynamicImage> {

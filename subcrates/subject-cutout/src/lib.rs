@@ -7,7 +7,7 @@ use imageproc::{
     morphology::{close, dilate, erode},
     region_labelling::{Connectivity, connected_components},
 };
-use ort::{inputs, session::Session, value::Value};
+use ort::{environment::Environment, inputs, session::Session, value::Value};
 use std::{collections::HashSet, path::Path};
 
 use variables::*;
@@ -35,47 +35,80 @@ pub enum Model {
     U2NetP,
 }
 
+#[allow(dead_code)]
 pub struct Segmenter {
     model: Model,
     session: Session,
 }
 
+/// Bytes of the embedded model, or `NotEmbedded` if its `embed-*` feature is off.
+fn embedded_bytes(model: Model) -> Result<&'static [u8]> {
+    match model {
+        #[cfg(feature = "embed-u2net")]
+        Model::U2Net => Ok(include_bytes!("../models/u2net.onnx") as &[u8]),
+        #[cfg(feature = "embed-u2netp")]
+        Model::U2NetP => Ok(include_bytes!("../models/u2netp.onnx") as &[u8]),
+        #[allow(unreachable_patterns)]
+        _ => Err(Error::NotEmbedded(model)),
+    }
+}
+
 impl Segmenter {
+    fn default_env() -> Result<Environment> {
+        Ok(ort::init().build()?)
+    }
+
+    // ---- from a file path ------------------------------------------------
+
     pub fn from_path(model: Model, path: impl AsRef<Path>) -> Result<Self> {
-        let env = ort::init().build()?;
-        Self::from_path_with_env(model, &env, path)
+        Self::from_path_with_env(model, &Self::default_env()?, path)
     }
 
     pub fn from_path_with_env(
         model: Model,
-        env: &ort::environment::Environment,
+        env: &Environment,
         path: impl AsRef<Path>,
     ) -> Result<Self> {
         let session = Session::builder(env)?.commit_from_file(path)?;
         Ok(Self { model, session })
     }
 
+    // ---- from raw bytes --------------------------------------------------
+
     pub fn from_bytes(model: Model, bytes: &[u8]) -> Result<Self> {
-        let env = ort::init().build()?;
-        Self::from_bytes_with_env(model, &env, bytes)
+        Self::from_bytes_with_env(model, &Self::default_env()?, bytes)
     }
 
-    pub fn from_bytes_with_env(
-        model: Model,
-        env: &ort::environment::Environment,
-        bytes: &[u8],
-    ) -> Result<Self> {
+    pub fn from_bytes_with_env(model: Model, env: &Environment, bytes: &[u8]) -> Result<Self> {
         let session = Session::builder(env)?.commit_from_memory(bytes)?;
         Ok(Self { model, session })
     }
 
+    // ---- from the embedded model (needs the matching `embed-*` feature) --
+
+    pub fn embedded(model: Model) -> Result<Self> {
+        Self::embedded_with_env(model, &Self::default_env()?)
+    }
+
+    pub fn embedded_with_env(model: Model, env: &Environment) -> Result<Self> {
+        Self::from_bytes_with_env(model, env, embedded_bytes(model)?)
+    }
+
+    // ---- custom session --------------------------------------------------
+
     pub fn new_with_env(
         model: Model,
-        env: &ort::environment::Environment,
-        build_fn: impl FnOnce(&ort::environment::Environment) -> ort::Result<Session>,
+        env: &Environment,
+        build_fn: impl FnOnce(&Environment) -> ort::Result<Session>,
     ) -> Result<Self> {
-        let session = build_fn(env)?;
-        Ok(Self { model, session })
+        Ok(Self {
+            model,
+            session: build_fn(env)?,
+        })
+    }
+
+    pub fn model(&self) -> Model {
+        self.model
     }
 
     #[cfg(any(feature = "embed-u2net", feature = "embed-u2netp"))]

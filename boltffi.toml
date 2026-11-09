@@ -1,5 +1,6 @@
 [package]
 name = "object_recognizer"
+crate = "object_recognizer"
 
 [targets.python]
 enabled = true
@@ -8,3 +9,11 @@ module_name = "object_recognizer"
 [targets.python.wheel]
 output = "dist/python/wheelhouse"
 interpreters = ["python3.11", "python3.12", "python3.13"]
+
+[targets.csharp]
+enabled = true
+output = "dist/csharp"
+namespace = "ObjectRecognizer"
+package_id = "ObjectRecognizer"
+target_framework = "net10.0"
+runtime_identifiers = ["current"]

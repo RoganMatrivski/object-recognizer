@@ -2159,22 +2159,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "object-recognizer"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "boltffi",
- "image",
- "object-recognizer-feature-extraction",
- "object-recognizer-subject-cutout",
- "object-recognizer-vecdb",
- "ort",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "object-recognizer-bin"
 version = "0.1.0"
 dependencies = [
@@ -2183,7 +2167,7 @@ dependencies = [
  "eyre",
  "image",
  "mimalloc",
- "object-recognizer",
+ "object_recognizer",
  "ort",
  "tracing",
  "tracing-error",
@@ -2200,6 +2184,10 @@ dependencies = [
  "ort",
  "thiserror 1.0.69",
 ]
+
+[[package]]
+name = "object-recognizer-ffi"
+version = "0.1.0"
 
 [[package]]
 name = "object-recognizer-subject-cutout"
@@ -2220,6 +2208,22 @@ dependencies = [
  "qdrant-edge",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "object_recognizer"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "boltffi",
+ "image",
+ "object-recognizer-feature-extraction",
+ "object-recognizer-subject-cutout",
+ "object-recognizer-vecdb",
+ "ort",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

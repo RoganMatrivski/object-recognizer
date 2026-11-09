@@ -1,7 +1,7 @@
 [workspace]
 members = [
     ".",
-    "bin", "subcrates/feature-extraction", "subcrates/subject-cutout","subcrates/vecdb",
+    "bin", "ffi", "subcrates/feature-extraction", "subcrates/subject-cutout","subcrates/vecdb",
 ]
 
 [workspace.dependencies]
@@ -10,13 +10,13 @@ imageproc = { version = "0.27", default-features = false }
 ort = { version = "2.0.0-rc.14", default-features = false, features = ["load-dynamic"] }
 thiserror = "1"
 
-object-recognizer = { version = "0.1.0", path = "." }
+object_recognizer = { version = "0.1.0", path = "." }
 object-recognizer-feature-extraction = { version = "0.1.0", path = "subcrates/feature-extraction" }
 object-recognizer-subject-cutout = { version = "0.1.0", path = "subcrates/subject-cutout" }
 object-recognizer-vecdb = { version = "0.1.0", path = "subcrates/vecdb" }
 
 [package]
-name = "object-recognizer"
+name = "object_recognizer"
 version = "0.1.0"
 edition = "2024"
 
@@ -34,9 +34,6 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
 boltffi = "0.32.1"
-
-
-
 
 
 [features]

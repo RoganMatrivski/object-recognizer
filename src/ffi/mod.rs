@@ -23,6 +23,27 @@ impl RecognizerWrapper {
         })
     }
 
+    pub fn new_embedded(vecdb_path: String) -> Result<Self, String> {
+        let inner = crate::Recognizer::new_embedded(vecdb_path).map_err(|e| e.to_string())?;
+        Ok(Self {
+            inner: std::sync::Mutex::new(inner),
+        })
+    }
+
+    pub fn new_embedded_lite(vecdb_path: String) -> Result<Self, String> {
+        let inner = crate::Recognizer::new_embedded_lite(vecdb_path).map_err(|e| e.to_string())?;
+        Ok(Self {
+            inner: std::sync::Mutex::new(inner),
+        })
+    }
+
+    pub fn new_embedded_default() -> Result<Self, String> {
+        let inner = crate::Recognizer::new_embedded_default().map_err(|e| e.to_string())?;
+        Ok(Self {
+            inner: std::sync::Mutex::new(inner),
+        })
+    }
+
     pub fn new_default(segmenter_model_path: String) -> Result<Self, String> {
         let inner =
             crate::Recognizer::new_default(segmenter_model_path).map_err(|e| e.to_string())?;
@@ -85,6 +106,23 @@ impl RecognizerWrapper {
     pub fn vector_db_save(&self, path: String) -> Result<(), String> {
         let inner = self.inner.lock().map_err(|e| e.to_string())?;
         inner.vector_db_save(&path).map_err(|e| e.to_string())
+    }
+
+    pub fn vector_db_export(&self, path: String) -> Result<usize, String> {
+        let inner = self.inner.lock().map_err(|e| e.to_string())?;
+        let count = inner.vecdb.export(&path).map_err(|e| e.to_string())?;
+        Ok(count)
+    }
+
+    pub fn vector_db_import(&self, path: String, replace: bool) -> Result<usize, String> {
+        let inner = self.inner.lock().map_err(|e| e.to_string())?;
+        let mode = if replace {
+            object_recognizer_vecdb::ImportMode::Replace
+        } else {
+            object_recognizer_vecdb::ImportMode::Merge
+        };
+        let count = inner.vecdb.import(&path, mode).map_err(|e| e.to_string())?;
+        Ok(count)
     }
 
     pub fn add_training_sample(
