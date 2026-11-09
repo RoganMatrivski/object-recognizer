@@ -43,13 +43,29 @@ pub struct Segmenter {
 impl Segmenter {
     pub fn from_path(model: Model, path: impl AsRef<Path>) -> Result<Self> {
         let env = ort::init().build()?;
-        let session = Session::builder(&env)?.commit_from_file(path)?;
+        Self::from_path_with_env(model, &env, path)
+    }
+
+    pub fn from_path_with_env(
+        model: Model,
+        env: &ort::environment::Environment,
+        path: impl AsRef<Path>,
+    ) -> Result<Self> {
+        let session = Session::builder(env)?.commit_from_file(path)?;
         Ok(Self { model, session })
     }
 
     pub fn from_bytes(model: Model, bytes: &[u8]) -> Result<Self> {
         let env = ort::init().build()?;
-        let session = Session::builder(&env)?.commit_from_memory(bytes)?;
+        Self::from_bytes_with_env(model, &env, bytes)
+    }
+
+    pub fn from_bytes_with_env(
+        model: Model,
+        env: &ort::environment::Environment,
+        bytes: &[u8],
+    ) -> Result<Self> {
+        let session = Session::builder(env)?.commit_from_memory(bytes)?;
         Ok(Self { model, session })
     }
 
