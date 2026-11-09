@@ -1,0 +1,7 @@
+[env]
+CFLAGS = "/MD"
+CXXFLAGS = "/MD"
+
+[build]
+target-dir = "C:\\cargo-target"
+incremental = true
