@@ -2,6 +2,8 @@ pub use object_recognizer_feature_extraction;
 pub use object_recognizer_subject_cutout;
 pub use object_recognizer_vecdb;
 
+pub mod boltffi;
+
 pub use object_recognizer_vecdb::{Condition, Filter, Hit};
 
 #[derive(Debug, thiserror::Error)]
