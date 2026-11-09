@@ -3,4 +3,12 @@ name = "object-recognizer-ffi"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [dependencies]
+boltffi = "0.32.1"
+image.workspace = true
+object_recognizer = { version = "0.1.0", path = "..", feature = ["embed-u2net", "embed-model"] }
+serde = "1.0.229"
+serde_json = "1.0.154"

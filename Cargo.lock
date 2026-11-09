@@ -2188,6 +2188,13 @@ dependencies = [
 [[package]]
 name = "object-recognizer-ffi"
 version = "0.1.0"
+dependencies = [
+ "boltffi",
+ "image",
+ "object_recognizer",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "object-recognizer-subject-cutout"

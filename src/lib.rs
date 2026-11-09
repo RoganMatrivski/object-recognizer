@@ -1,12 +1,8 @@
-use object_recognizer_feature_extraction;
-use object_recognizer_subject_cutout;
-use object_recognizer_vecdb;
+pub use object_recognizer_feature_extraction;
+pub use object_recognizer_subject_cutout;
+pub use object_recognizer_vecdb;
 
 use object_recognizer_subject_cutout::{Model, Segmenter};
-
-boltffi::scaffolding!();
-
-pub mod ffi;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
