@@ -13,6 +13,7 @@
 
 import torch
 import timm
+import onnx
 
 MODEL_NAME = "mobilenetv3_large_100"
 OUTPUT_FILE = "mobilenetv3_embedding.onnx"
@@ -44,6 +45,19 @@ torch.onnx.export(
     external_data=False,
 )
 
+print("Adjusting ONNX IR version for ORT compatibility...")
+
+onnx_model = onnx.load(OUTPUT_FILE)
+
+print(f"Original IR version: {onnx_model.ir_version}")
+
+onnx_model.ir_version = 9
+
+onnx.checker.check_model(onnx_model)
+
+onnx.save(onnx_model, OUTPUT_FILE)
+
+print(f"Final IR version: {onnx_model.ir_version}")
 print(f"Exported: {OUTPUT_FILE}")
 
 # Verify output dimensions
