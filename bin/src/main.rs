@@ -1,6 +1,4 @@
 use color_eyre::Report;
-use object_recognizer::object_recognizer_feature_extraction::FeatureExtractor;
-use object_recognizer::object_recognizer_subject_cutout::{Model, Segmenter};
 
 mod init;
 
@@ -11,7 +9,7 @@ mod init;
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[tracing::instrument]
-fn main() -> Result<(), Report> {
+fn main() -> Result<(), color_eyre::Report> {
     init::initialize()?;
     println!("Hello, world!");
 
@@ -19,15 +17,13 @@ fn main() -> Result<(), Report> {
 
     let samples_dir = "D:/fruit-recognizer-py/samples";
 
-    let _env = ort::init().build()?;
+    let recognizer = object_recognizer::Recognizer::new(
+        "../subcrates/subject-cutout/models/u2net.onnx",
+        "tmp/vecdb/",
+    )?;
 
-    let mut seg = Segmenter::new_with_env(Model::U2Net, &_env, |env| {
-        ort::session::Session::builder(env)?.commit_from_memory(include_bytes!(
-            "../../subcrates/subject-cutout/models/u2net.onnx"
-        ))
-    })?;
-
-    let mut extractor = FeatureExtractor::new_embedded_with_env(&_env)?;
+    let mut seg = recognizer.seg;
+    let mut extractor = recognizer.extractor;
 
     println!("Loaded models in {:?}", start_total.elapsed());
 
