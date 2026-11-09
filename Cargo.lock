@@ -2186,17 +2186,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "object-recognizer-ffi"
-version = "0.1.0"
-dependencies = [
- "boltffi",
- "image",
- "object_recognizer",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "object-recognizer-subject-cutout"
 version = "0.1.0"
 dependencies = [
@@ -2231,6 +2220,17 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "object_recognizer_ffi"
+version = "0.1.0"
+dependencies = [
+ "boltffi",
+ "image",
+ "object_recognizer",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
