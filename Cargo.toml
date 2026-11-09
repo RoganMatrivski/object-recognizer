@@ -24,9 +24,15 @@ edition = "2024"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
-object-recognizer-feature-extraction = { workspace = true }
+object-recognizer-feature-extraction = { workspace = true, features = ["embed-model"] }
 object-recognizer-subject-cutout = { workspace = true }
 object-recognizer-vecdb = { workspace = true }
+ort = { workspace = true }
+thiserror = { workspace = true }
+image = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
 
 
 

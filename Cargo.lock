@@ -2089,9 +2089,15 @@ dependencies = [
 name = "object-recognizer"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "image",
  "object-recognizer-feature-extraction",
  "object-recognizer-subject-cutout",
  "object-recognizer-vecdb",
+ "ort",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
