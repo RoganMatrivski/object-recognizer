@@ -1,5 +1,6 @@
 use color_eyre::Report;
-use object_recognizer::object_recognizer_subject_cutout::Segmenter;
+use object_recognizer::object_recognizer_feature_extraction::FeatureExtractor;
+use object_recognizer::object_recognizer_subject_cutout::{Model, Segmenter};
 
 mod init;
 
@@ -18,12 +19,17 @@ fn main() -> Result<(), Report> {
 
     let samples_dir = "D:/fruit-recognizer-py/samples";
 
-    let mut seg = Segmenter::from_path(
-        object_recognizer::object_recognizer_subject_cutout::Model::U2Net,
-        "../models/u2net.onnx",
-    )?;
-    // let mut seg = Segmenter::from_path(object_recognizer::Model::U2NetP, "../models/u2netp.onnx")?;
-    println!("Loaded model in {:?}", start_total.elapsed());
+    let _env = ort::init().build()?;
+
+    let mut seg = Segmenter::new_with_env(Model::U2Net, &_env, |env| {
+        ort::session::Session::builder(env)?.commit_from_memory(include_bytes!(
+            "../../subcrates/subject-cutout/models/u2net.onnx"
+        ))
+    })?;
+
+    let mut extractor = FeatureExtractor::new_embedded_with_env(&_env)?;
+
+    println!("Loaded models in {:?}", start_total.elapsed());
 
     for entry in std::fs::read_dir(samples_dir)? {
         let entry = entry?;
@@ -51,6 +57,19 @@ fn main() -> Result<(), Report> {
         let seg_start = std::time::Instant::now();
         let outs = seg.instance_cutout(&img)?;
         println!("  - Segmentation took {:?}", seg_start.elapsed());
+
+        let extract_start = std::time::Instant::now();
+        let mut embeddings = Vec::new();
+        for out in &outs {
+            let dyn_img = image::DynamicImage::ImageRgba8(out.clone());
+            let embedding = extractor.extract(&dyn_img)?;
+            embeddings.push(embedding);
+        }
+        println!(
+            "  - Feature extraction for {} cutout(s) took {:?}",
+            outs.len(),
+            extract_start.elapsed()
+        );
 
         let stem = path
             .file_stem()

@@ -13,11 +13,15 @@ mimalloc = "^0.1.52"
 clap = { version = "^4.6", features = ["derive"] }
 color-eyre = { version = "0.6", features = ["capture-spantrace"] }
 eyre = { version = "0.6" }
-image = "0.25.10"
-object-recognizer = { version = "0.1.0", path = ".." }
+image = { workspace = true }
+object-recognizer = { workspace = true }
+ort = { workspace = true }
 tracing = "0.1.44"
 tracing-error = "0.2.1"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 
-[profile.dev.package.backtrace]
-opt-level = 3
+[features]
+default = ["embed-u2net", "embed-u2netp", "embed-model"]
+embed-u2net = ["object-recognizer/embed-u2net"]
+embed-u2netp = ["object-recognizer/embed-u2netp"]
+embed-model = ["object-recognizer/embed-model"]
