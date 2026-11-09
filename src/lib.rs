@@ -2,7 +2,9 @@ pub use object_recognizer_feature_extraction;
 pub use object_recognizer_subject_cutout;
 pub use object_recognizer_vecdb;
 
-pub mod boltffi;
+pub mod ffi;
+
+boltffi::scaffolding!();
 
 pub use object_recognizer_vecdb::{Condition, Filter, Hit};
 

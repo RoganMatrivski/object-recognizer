@@ -1,2 +1,10 @@
 [package]
-name = "object-recognizer"
+name = "object_recognizer"
+
+[targets.python]
+enabled = true
+module_name = "object_recognizer"
+
+[targets.python.wheel]
+output = "dist/python/wheelhouse"
+interpreters = ["python3.11", "python3.12", "python3.13"]
