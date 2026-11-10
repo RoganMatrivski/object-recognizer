@@ -9,6 +9,7 @@ module_name = "object_recognizer"
 [targets.python.wheel]
 output = "dist/python/wheelhouse"
 interpreters = ["python3.11", "python3.12", "python3.13"]
+# interpreters = ["python3.12"]
 
 [targets.csharp]
 enabled = true

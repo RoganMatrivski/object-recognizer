@@ -57,21 +57,17 @@ impl RecognizerWrapper {
         })
     }
 
-    pub fn segment_subject(&self, image_bytes: Vec<u8>) -> Result<Vec<Vec<u8>>, String> {
+    pub fn segment_subject_raw(&self, image_bytes: Vec<u8>) -> Result<Vec<Vec<u8>>, String> {
         let img = image::load_from_memory(&image_bytes).map_err(|e| e.to_string())?;
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
-        let cutouts = inner.segment_subject(&img).map_err(|e| e.to_string())?;
+        let cutouts = inner
+            .seg
+            .instance_squares(&img, Some(224))
+            .map_err(|e| e.to_string())?;
         let mut out_vec = Vec::new();
         for cutout in cutouts {
-            let mut bytes = Vec::new();
-            let dyn_img = image::DynamicImage::from(cutout);
-            dyn_img
-                .write_to(
-                    &mut std::io::Cursor::new(&mut bytes),
-                    image::ImageFormat::Png,
-                )
-                .map_err(|e| e.to_string())?;
-            out_vec.push(bytes);
+            // cutout is an RgbImage, .into_raw() consumes it and returns the underlying Vec<u8> of raw pixels with zero copies or encoding
+            out_vec.push(cutout.into_raw());
         }
         Ok(out_vec)
     }
@@ -133,6 +129,11 @@ impl RecognizerWrapper {
         };
         let count = inner.vecdb.import(&path, mode).map_err(|e| e.to_string())?;
         Ok(count)
+    }
+
+    pub fn vector_db_clear(&self) -> Result<(), String> {
+        let inner = self.inner.lock().map_err(|e| e.to_string())?;
+        inner.vecdb.clear().map_err(|e| e.to_string())
     }
 
     pub fn add_training_sample(
