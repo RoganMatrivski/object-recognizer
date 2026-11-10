@@ -8,84 +8,83 @@ mod init;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+static TEST_DATA: [(&[u8], &str); 16] = [
+    (include_bytes!("../testdata/apple (6).jpg"), "apple (6).jpg"),
+    (
+        include_bytes!("../testdata/bananas (3).jpg"),
+        "bananas (3).jpg",
+    ),
+    (
+        include_bytes!("../testdata/durian (16).jpg"),
+        "durian (16).jpg",
+    ),
+    (
+        include_bytes!("../testdata/durian (5).jpg"),
+        "durian (5).jpg",
+    ),
+    (
+        include_bytes!("../testdata/durians (3).jpg"),
+        "durians (3).jpg",
+    ),
+    (
+        include_bytes!("../testdata/grape - 1 (6).jpg"),
+        "grape - 1 (6).jpg",
+    ),
+    (
+        include_bytes!("../testdata/grape - 2 (4).jpg"),
+        "grape - 2 (4).jpg",
+    ),
+    (
+        include_bytes!("../testdata/grapes (3).jpg"),
+        "grapes (3).jpg",
+    ),
+    (
+        include_bytes!("../testdata/green apple (6).jpg"),
+        "green apple (6).jpg",
+    ),
+    (
+        include_bytes!("../testdata/green peppers (6).jpg"),
+        "green peppers (6).jpg",
+    ),
+    (
+        include_bytes!("../testdata/orange (4).jpg"),
+        "orange (4).jpg",
+    ),
+    (
+        include_bytes!("../testdata/oranges (4).jpg"),
+        "oranges (4).jpg",
+    ),
+    (
+        include_bytes!("../testdata/papaya (7).jpg"),
+        "papaya (7).jpg",
+    ),
+    (include_bytes!("../testdata/pear (4).jpg"), "pear (4).jpg"),
+    (include_bytes!("../testdata/pears (6).jpg"), "pears (6).jpg"),
+    (
+        include_bytes!("../testdata/red peppers (5).jpg"),
+        "red peppers (5).jpg",
+    ),
+];
+
 #[tracing::instrument]
 fn main() -> Result<(), color_eyre::Report> {
-    init::initialize()?;
+    let _args = init::initialize()?;
     println!("Hello, world!");
 
     let start_total = std::time::Instant::now();
+    let mut recognizer = object_recognizer::Recognizer::new_embedded(tempfile::tempdir()?.path())?;
 
-    let samples_dir = "D:/fruit-recognizer-py/samples";
-
-    let recognizer = object_recognizer::Recognizer::new(
-        "../subcrates/subject-cutout/models/u2net.onnx",
-        "tmp/vecdb/",
-    )?;
-
-    let mut seg = recognizer.seg;
-    let mut extractor = recognizer.extractor;
-
-    println!("Loaded models in {:?}", start_total.elapsed());
-
-    for entry in std::fs::read_dir(samples_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
+    for (data, name) in TEST_DATA {
+        let start_img = std::time::Instant::now();
+        let img = image::load_from_memory(&data)?;
+        let cutouts = recognizer.segment_subject(&img)?;
+        for cutout in &cutouts {
+            let _embedding = recognizer.generate_embedding(cutout)?;
         }
-
-        let file_name = match path.file_name().and_then(|n| n.to_str()) {
-            Some(name) => name.to_string(),
-            None => continue,
-        };
-
-        let file_start = std::time::Instant::now();
-        println!("Processing file: {}", file_name);
-
-        let img = match image::open(&path) {
-            Ok(img) => img,
-            Err(e) => {
-                eprintln!("Failed to open image {}: {:?}", file_name, e);
-                continue;
-            }
-        };
-
-        let seg_start = std::time::Instant::now();
-        let outs = seg.instance_cutout(&img)?;
-        println!("  - Segmentation took {:?}", seg_start.elapsed());
-
-        let extract_start = std::time::Instant::now();
-        let mut embeddings = Vec::new();
-        for out in &outs {
-            let dyn_img = image::DynamicImage::ImageRgba8(out.clone());
-            let embedding = extractor.extract(&dyn_img)?;
-            embeddings.push(embedding);
-        }
-        println!(
-            "  - Feature extraction for {} cutout(s) took {:?}",
-            outs.len(),
-            extract_start.elapsed()
-        );
-
-        let stem = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("output");
-        std::fs::create_dir_all("tmp")?;
-
-        let save_start = std::time::Instant::now();
-        for (i, out) in outs.into_iter().enumerate() {
-            out.save(format!("tmp/{stem} {i}.png"))?;
-        }
-        println!("  - Saving cutouts took {:?}", save_start.elapsed());
-        println!(
-            "Finished file {} in total {:?}",
-            file_name,
-            file_start.elapsed()
-        );
+        tracing::trace!(name = %name, cutouts_count = cutouts.len(), elapsed_ms = ?start_img.elapsed().as_secs_f64() * 1000.0, "processed test image with embedding");
     }
 
-    println!("All processing completed in {:?}", start_total.elapsed());
+    tracing::trace!(elapsed_ms = ?start_total.elapsed().as_secs_f64() * 1000.0, "full test suite completed");
 
     Ok(())
 }

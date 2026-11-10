@@ -25,7 +25,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
 object-recognizer-feature-extraction = { workspace = true, features = ["embed-model"] }
-object-recognizer-subject-cutout = { workspace = true }
+object-recognizer-subject-cutout = { workspace = true, features = ["fast-resize"] }
 object-recognizer-vecdb = { workspace = true }
 ort = { workspace = true }
 thiserror = { workspace = true }
@@ -34,6 +34,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
 boltffi = "0.32.1"
+tracing = "0.1"
+
 
 
 [features]

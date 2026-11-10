@@ -57,18 +57,23 @@ impl RecognizerWrapper {
         })
     }
 
-    pub fn segment_subject(&self, image_bytes: Vec<u8>) -> Result<Vec<u8>, String> {
+    pub fn segment_subject(&self, image_bytes: Vec<u8>) -> Result<Vec<Vec<u8>>, String> {
         let img = image::load_from_memory(&image_bytes).map_err(|e| e.to_string())?;
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
-        let cutout = inner.segment_subject(&img).map_err(|e| e.to_string())?;
-        let mut bytes = Vec::new();
-        cutout
-            .write_to(
-                &mut std::io::Cursor::new(&mut bytes),
-                image::ImageFormat::Png,
-            )
-            .map_err(|e| e.to_string())?;
-        Ok(bytes)
+        let cutouts = inner.segment_subject(&img).map_err(|e| e.to_string())?;
+        let mut out_vec = Vec::new();
+        for cutout in cutouts {
+            let mut bytes = Vec::new();
+            let dyn_img = image::DynamicImage::from(cutout);
+            dyn_img
+                .write_to(
+                    &mut std::io::Cursor::new(&mut bytes),
+                    image::ImageFormat::Png,
+                )
+                .map_err(|e| e.to_string())?;
+            out_vec.push(bytes);
+        }
+        Ok(out_vec)
     }
 
     pub fn generate_embedding(&self, image_bytes: Vec<u8>) -> Result<Vec<f32>, String> {
@@ -139,10 +144,10 @@ impl RecognizerWrapper {
         let meta: serde_json::Value =
             serde_json::from_str(&metadata_json).map_err(|e| e.to_string())?;
         let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
-        let id = inner
+        let ids = inner
             .add_training_sample(&img, &meta)
             .map_err(|e| e.to_string())?;
-        Ok(id)
+        Ok(ids.first().copied().unwrap_or(0))
     }
 
     pub fn classify_image(

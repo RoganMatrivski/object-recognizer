@@ -1,6 +1,26 @@
+//! # Which function runs at which resolution
+//!
+//! | function              | runs at          | cost                          |
+//! |-----------------------|------------------|-------------------------------|
+//! | `mask_small`          | 320x320          | model run + cheap             |
+//! | `solid_mask_small`    | 320x320          | cheap                         |
+//! | `instance_cutout`     | 320x320, then a  | cheap: scales with subject    |
+//! |                       | crop per subject | size, not photo size          |
+//! | `mask_full`           | full photo       | slow: Lanczos3 upscale        |
+//! | `cutout_full`         | full photo       | slow                          |
+//! | `solid_mask_full`     | full photo       | slowest: Otsu/close/fill on   |
+//! |                       |                  | every pixel                   |
+//!
+//! The old names `mask`, `cutout`, `solid_mask` still work but are deprecated, so
+//! the compiler flags every call site that is on a slow path.
+
+pub mod decode;
+mod resize;
 pub mod variables;
 
-use image::{DynamicImage, GrayImage, Luma, Rgba, RgbaImage, imageops::FilterType};
+pub use decode::{open_image, open_image_with};
+
+use image::{DynamicImage, GrayImage, Luma, Rgb, RgbImage, Rgba, RgbaImage};
 use imageproc::{
     contrast::{otsu_level, threshold},
     distance_transform::Norm,
@@ -8,6 +28,7 @@ use imageproc::{
     region_labelling::{Connectivity, connected_components},
 };
 use ort::{environment::Environment, inputs, session::Session, value::Value};
+use resize::Filter;
 use std::{collections::HashSet, path::Path};
 
 use variables::*;
@@ -127,11 +148,15 @@ impl Segmenter {
 
     /// Raw saliency map at model resolution (INPUT_SIZE x INPUT_SIZE), 0..=255.
     pub fn mask_small(&mut self, img: &DynamicImage) -> Result<GrayImage> {
-        let small = img
-            // Triangle is far cheaper than Lanczos3 on big photos and plenty for a
-            // 320x320 model input.
-            .resize_exact(INPUT_SIZE, INPUT_SIZE, FilterType::Triangle)
-            .to_rgb8();
+        let _span = tracing::trace_span!("Segmenter::mask_small").entered();
+        let start = std::time::Instant::now();
+        // Triangle is far cheaper than Lanczos3 on big photos and plenty for a
+        // 320x320 model input. (`fast-resize` feature: SIMD backend.)
+        let resize_start = std::time::Instant::now();
+        let small = resize::rgb(img, INPUT_SIZE, INPUT_SIZE, Filter::Triangle);
+        let resize_ms = resize_start.elapsed().as_secs_f64() * 1000.0;
+
+        let prep_start = std::time::Instant::now();
         let max = small.as_raw().iter().copied().max().unwrap_or(1).max(1) as f32;
         let n = (INPUT_SIZE * INPUT_SIZE) as usize;
         let mut data = vec![0f32; 3 * n];
@@ -142,8 +167,13 @@ impl Segmenter {
         }
         let input_tensor =
             Value::from_array((vec![1, 3, INPUT_SIZE as usize, INPUT_SIZE as usize], data))?;
+        let prep_ms = prep_start.elapsed().as_secs_f64() * 1000.0;
 
+        let infer_start = std::time::Instant::now();
         let outputs = self.session.run(inputs!["input.1" => input_tensor])?;
+        let infer_ms = infer_start.elapsed().as_secs_f64() * 1000.0;
+
+        let post_start = std::time::Instant::now();
         // Extract the first output tensor
         let (shape, data) = outputs[0].try_extract_tensor::<f32>()?;
         let shape_vec = shape.iter().map(|&s| s as usize).collect::<Vec<_>>();
@@ -165,30 +195,72 @@ impl Segmenter {
             .iter()
             .map(|&v| (((v - mn) / range) * 255.0).round().clamp(0.0, 255.0) as u8)
             .collect();
+        let post_ms = post_start.elapsed().as_secs_f64() * 1000.0;
+        let total_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+        tracing::trace!(
+            resize_ms = resize_ms,
+            prep_ms = prep_ms,
+            infer_ms = infer_ms,
+            post_ms = post_ms,
+            total_ms = total_ms,
+            "Segmenter::mask_small detailed breakdown"
+        );
+
         Ok(GrayImage::from_raw(INPUT_SIZE, INPUT_SIZE, bytes).unwrap())
     }
 
     /// 255 = subject, 0 = background, at the input image's size.
-    pub fn mask(&mut self, img: &DynamicImage) -> Result<GrayImage> {
+    /// SLOW on big photos: upscales the whole mask to full resolution.
+    pub fn mask_full(&mut self, img: &DynamicImage) -> Result<GrayImage> {
         let small_mask = self.mask_small(img)?;
-        Ok(image::imageops::resize(
+        Ok(resize::gray(
             &small_mask,
             img.width(),
             img.height(),
-            FilterType::Lanczos3,
+            Filter::Lanczos3,
         ))
     }
 
-    pub fn cutout(&mut self, img: &DynamicImage) -> Result<RgbaImage> {
-        let m = self.mask(img)?;
+    /// Whole photo with the soft mask as alpha. SLOW on big photos (full-res work).
+    pub fn cutout_full(&mut self, img: &DynamicImage) -> Result<RgbaImage> {
+        let m = self.mask_full(img)?;
         Ok(apply_mask(img, &m))
     }
 
-    /// Binary (0/255) subject mask with cracks bridged and enclosed holes filled.
-    /// Use this for geometry (connectivity, bounding boxes), not for soft alpha.
-    pub fn solid_mask(&mut self, img: &DynamicImage) -> Result<GrayImage> {
-        let soft = self.mask(img)?;
+    /// Binary (0/255) subject mask with cracks bridged and enclosed holes filled, at
+    /// model resolution (320x320). Use this for geometry (connectivity, bounding
+    /// boxes), not for soft alpha. Cheap.
+    pub fn solid_mask_small(&mut self, img: &DynamicImage) -> Result<GrayImage> {
+        let soft = self.mask_small(img)?;
         Ok(solidify(&soft))
+    }
+
+    /// Same as `solid_mask_small` but at the photo's resolution. SLOWEST: threshold,
+    /// closing and hole filling all run on every pixel. Prefer `solid_mask_small`
+    /// (scale coordinates yourself) or `instance_cutout`.
+    pub fn solid_mask_full(&mut self, img: &DynamicImage) -> Result<GrayImage> {
+        let soft = self.mask_full(img)?;
+        Ok(solidify(&soft))
+    }
+
+    // ---- deprecated aliases: old names, kept so existing callers still compile ----
+
+    #[deprecated(note = "renamed `mask_full`; runs at full photo resolution (slow). \
+                         Prefer `instance_cutout` or `mask_small`.")]
+    pub fn mask(&mut self, img: &DynamicImage) -> Result<GrayImage> {
+        self.mask_full(img)
+    }
+
+    #[deprecated(note = "renamed `cutout_full`; runs at full photo resolution (slow). \
+                         Prefer `instance_cutout`.")]
+    pub fn cutout(&mut self, img: &DynamicImage) -> Result<RgbaImage> {
+        self.cutout_full(img)
+    }
+
+    #[deprecated(note = "renamed `solid_mask_full` (slowest). Prefer `solid_mask_small`.")]
+    pub fn solid_mask(&mut self, img: &DynamicImage) -> Result<GrayImage> {
+        self.solid_mask_full(img)
     }
 
     /// 1. salient mask (U2Net), kept at model resolution
@@ -240,13 +312,52 @@ impl Segmenter {
             let crop = img.crop_imm(ox0, oy0, cw, ch);
             let alpha = instance_alpha(&soft, &part);
             let m = image::imageops::crop_imm(&alpha, x0, y0, x1 - x0, y1 - y0).to_image();
-            let mut m = image::imageops::resize(&m, cw, ch, FilterType::CatmullRom);
+            let mut m = resize::gray(&m, cw, ch, Filter::CatmullRom);
             m.pixels_mut().for_each(|p| p[0] = lut[p[0] as usize]);
             let mut rgba = apply_mask(&crop, &m);
             bleed_edges(&mut rgba, band_px);
             out.push(rgba);
         }
         Ok(out)
+    }
+
+    /// `instance_cutout`, then each subject centred on a square `SQUARE_BG` canvas
+    /// (RGB, aspect ratio preserved). `side = Some(224)` etc. resizes to a fixed
+    /// input size for the extractor; `None` keeps natural size.
+    pub fn instance_squares(
+        &mut self,
+        img: &DynamicImage,
+        side: Option<u32>,
+    ) -> Result<Vec<RgbImage>> {
+        Ok(self
+            .instance_cutout(img)?
+            .iter()
+            .map(|c| square_on(c, SQUARE_BG, side))
+            .collect())
+    }
+}
+
+/// Centre a cutout on a square canvas filled with `bg`, alpha-blending the subject
+/// over it (no stretching, no distortion). The result is plain RGB, ready for a feature
+/// extractor. `side = Some(n)` also resizes the square to n x n; `None` keeps the
+/// natural size (the longer side of the cutout).
+pub fn square_on(img: &RgbaImage, bg: [u8; 3], side: Option<u32>) -> RgbImage {
+    let (w, h) = img.dimensions();
+    let s = w.max(h).max(1);
+    let mut out = RgbImage::from_pixel(s, s, Rgb(bg));
+    let (ox, oy) = ((s - w) / 2, (s - h) / 2);
+    for (x, y, p) in img.enumerate_pixels() {
+        let a = p[3] as u32;
+        let o = out.get_pixel_mut(x + ox, y + oy);
+        for c in 0..3 {
+            o[c] = ((p[c] as u32 * a + o[c] as u32 * (255 - a) + 127) / 255) as u8;
+        }
+    }
+    match side {
+        Some(t) if t != s && t > 0 => {
+            resize::rgb(&DynamicImage::ImageRgb8(out), t, t, Filter::CatmullRom)
+        }
+        _ => out,
     }
 }
 
@@ -590,6 +701,26 @@ mod tests {
         assert_eq!(p[3], 128); // alpha untouched
         assert_eq!(img.get_pixel(5, 4).0, [255, 0, 0, 255]); // interior untouched
         assert_eq!(img.get_pixel(25, 4).0, [0, 0, 255, 0]); // invisible pixels skipped
+    }
+
+    #[test]
+    fn square_on_centres_without_distortion() {
+        let img = RgbaImage::from_pixel(10, 4, Rgba([255, 0, 0, 255])); // wide red strip
+        let sq = square_on(&img, [10, 20, 30], None);
+        assert_eq!(sq.dimensions(), (10, 10));
+        assert_eq!(sq.get_pixel(5, 5).0, [255, 0, 0]); // subject in the middle
+        assert_eq!(sq.get_pixel(5, 0).0, [10, 20, 30]); // padding = bg
+        assert_eq!(sq.get_pixel(5, 9).0, [10, 20, 30]);
+    }
+
+    #[test]
+    fn square_on_blends_alpha_and_resizes() {
+        let mut img = RgbaImage::from_pixel(4, 8, Rgba([200, 200, 200, 255]));
+        img.put_pixel(0, 0, Rgba([200, 200, 200, 0])); // transparent -> pure bg
+        let sq = square_on(&img, [0, 0, 0], None);
+        assert_eq!(sq.dimensions(), (8, 8));
+        assert_eq!(sq.get_pixel(2, 0).0, [0, 0, 0]); // (0,0) lands at (2,0)
+        assert_eq!(square_on(&img, [0, 0, 0], Some(16)).dimensions(), (16, 16));
     }
 
     #[test]

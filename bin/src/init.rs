@@ -20,7 +20,7 @@ macro_rules! pkg_name {
 pub fn initialize() -> Result<Args, Report> {
     use tracing_error::ErrorLayer;
     use tracing_subscriber::prelude::*;
-    use tracing_subscriber::{fmt, EnvFilter};
+    use tracing_subscriber::{EnvFilter, fmt};
 
     color_eyre::install()?;
 
@@ -36,7 +36,15 @@ pub fn initialize() -> Result<Args, Report> {
     // Try to build from RUST_LOG, or fall back to a base "warn"
     let env_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("warn"))
-        .add_directive(format!("{}={}", pkg_name!(), crate_level).parse().unwrap());
+        .add_directive(format!("{}={}", pkg_name!(), crate_level).parse().unwrap())
+        .add_directive("object_recognizer=trace".parse().unwrap())
+        .add_directive("object_recognizer_subject_cutout=trace".parse().unwrap())
+        .add_directive(
+            "object_recognizer_feature_extraction=trace"
+                .parse()
+                .unwrap(),
+        )
+        .add_directive("object_recognizer_vecdb=trace".parse().unwrap());
 
     let fmt_layer = fmt::layer()
         .with_writer(std::io::stderr)
@@ -52,4 +60,3 @@ pub fn initialize() -> Result<Args, Report> {
 
     Ok(args)
 }
-

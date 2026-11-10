@@ -42,3 +42,15 @@ pub const BLEED_KEEP_POW: i32 = 4;
 
 /// Longest side (in cells) the color-fill grid may have. Only a speed/memory cap.
 pub const BLEED_GRID_MAX: u32 = 512;
+
+/// Only used with the `jpeg-scaled` feature. JPEGs are decoded at the largest
+/// 1/2, 1/4 or 1/8 reduction whose shorter side is still >= this (pixels). Cutouts
+/// come out at this reduced size, so raise it if you need bigger crops. The model
+/// itself only sees 320x320, so ~640 leaves headroom. 0 is not allowed: use >= 1.
+pub const JPEG_MIN_SIDE: u16 = 640;
+
+/// Background colour the cutouts are flattened onto when squared up (`square_on`,
+/// `instance_squares`). Default is the ImageNet mean (0.485, 0.456, 0.406) * 255, which
+/// normalizes to exactly 0 for ImageNet-style extractors, so the padding carries no
+/// signal. Change it if your extractor uses different mean/std (e.g. CLIP).
+pub const SQUARE_BG: [u8; 3] = [124, 116, 104];

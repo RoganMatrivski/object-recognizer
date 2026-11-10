@@ -14,14 +14,9 @@ clap = { version = "^4.6", features = ["derive"] }
 color-eyre = { version = "0.6", features = ["capture-spantrace"] }
 eyre = { version = "0.6" }
 image = { workspace = true }
-object_recognizer = { workspace = true }
+object_recognizer = { workspace = true, features = ["embed-u2net", "embed-u2netp", "embed-model"] }
 ort = { workspace = true }
+tempfile = "3.27.0"
 tracing = "0.1.44"
 tracing-error = "0.2.1"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-
-[features]
-default = ["embed-u2net", "embed-u2netp", "embed-model"]
-embed-u2net = ["object_recognizer/embed-u2net"]
-embed-u2netp = ["object_recognizer/embed-u2netp"]
-embed-model = ["object_recognizer/embed-model"]

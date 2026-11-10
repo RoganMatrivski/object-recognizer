@@ -33,10 +33,14 @@ impl Recognizer {
     fn from_parts(
         env: ort::environment::Environment,
         seg: Segmenter,
+        _segmenter_model_path: impl AsRef<std::path::Path>,
         vecdb_path: impl AsRef<std::path::Path>,
     ) -> Result<Self> {
+        let _span = tracing::trace_span!("Recognizer::from_parts").entered();
+        let start = std::time::Instant::now();
         let extractor = create_feature_extractor(&env)?;
         let vecdb = object_recognizer_vecdb::VecDb::open(vecdb_path)?;
+        tracing::trace!(elapsed_ms = ?start.elapsed().as_secs_f64() * 1000.0, "Recognizer::from_parts completed");
         Ok(Self {
             env,
             seg,
@@ -49,9 +53,13 @@ impl Recognizer {
         segmenter_model_path: impl AsRef<std::path::Path>,
         vecdb_path: impl AsRef<std::path::Path>,
     ) -> Result<Self> {
+        let _span = tracing::trace_span!("Recognizer::new").entered();
+        let start = std::time::Instant::now();
         let env = ort::init().build()?;
-        let seg = create_segmenter_from_path(&env, segmenter_model_path)?;
-        Self::from_parts(env, seg, vecdb_path)
+        let seg = create_segmenter_from_path(&env, &segmenter_model_path)?;
+        let res = Self::from_parts(env, seg, segmenter_model_path, vecdb_path);
+        tracing::trace!(elapsed_ms = ?start.elapsed().as_secs_f64() * 1000.0, "Recognizer::new completed");
+        res
     }
 
     pub fn new_default(segmenter_model_path: impl AsRef<std::path::Path>) -> Result<Self> {
@@ -59,33 +67,56 @@ impl Recognizer {
     }
 
     pub fn new_embedded(vecdb_path: impl AsRef<std::path::Path>) -> Result<Self> {
+        let _span = tracing::trace_span!("Recognizer::new_embedded").entered();
+        let start = std::time::Instant::now();
         let env = ort::init().build()?;
         let seg = Segmenter::embedded_with_env(Model::U2Net, &env)?;
-        Self::from_parts(env, seg, vecdb_path)
+        let res = Self::from_parts(env, seg, "", vecdb_path);
+        tracing::trace!(elapsed_ms = ?start.elapsed().as_secs_f64() * 1000.0, "Recognizer::new_embedded completed");
+        res
     }
 
     pub fn new_embedded_lite(vecdb_path: impl AsRef<std::path::Path>) -> Result<Self> {
+        let _span = tracing::trace_span!("Recognizer::new_embedded_lite").entered();
+        let start = std::time::Instant::now();
         let env = ort::init().build()?;
         let seg = Segmenter::embedded_with_env(Model::U2NetP, &env)?;
-        Self::from_parts(env, seg, vecdb_path)
+        let res = Self::from_parts(env, seg, "", vecdb_path);
+        tracing::trace!(elapsed_ms = ?start.elapsed().as_secs_f64() * 1000.0, "Recognizer::new_embedded_lite completed");
+        res
     }
 
     pub fn new_embedded_default() -> Result<Self> {
         Self::new_embedded(object_recognizer_vecdb::DEFAULT_DIR)
     }
 
-    pub fn segment_subject(&mut self, img: &image::DynamicImage) -> Result<image::DynamicImage> {
-        let rgba = self.seg.cutout(img)?;
-        let dyn_img = image::DynamicImage::ImageRgba8(rgba);
-        Ok(dyn_img)
+    pub fn segment_subject(
+        &mut self,
+        img: &image::DynamicImage,
+    ) -> Result<Vec<image::DynamicImage>> {
+        let _span = tracing::trace_span!("Recognizer::segment_subject").entered();
+        let start = std::time::Instant::now();
+        let cutouts = self.seg.instance_squares(img, Some(224))?;
+        let dyn_imgs = cutouts
+            .into_iter()
+            .map(image::DynamicImage::ImageRgb8)
+            .collect();
+        tracing::trace!(elapsed_ms = ?start.elapsed().as_secs_f64() * 1000.0, "Recognizer::segment_subject completed");
+        Ok(dyn_imgs)
     }
 
-    pub fn preprocess_image(&mut self, img: &image::DynamicImage) -> Result<image::DynamicImage> {
+    pub fn preprocess_image(
+        &mut self,
+        img: &image::DynamicImage,
+    ) -> Result<Vec<image::DynamicImage>> {
         self.segment_subject(img)
     }
 
     pub fn generate_embedding(&mut self, img: &image::DynamicImage) -> Result<Vec<f32>> {
+        let _span = tracing::trace_span!("Recognizer::generate_embedding").entered();
+        let start = std::time::Instant::now();
         let embedding = self.extractor.extract(img)?;
+        tracing::trace!(elapsed_ms = ?start.elapsed().as_secs_f64() * 1000.0, "Recognizer::generate_embedding completed");
         Ok(embedding)
     }
 
@@ -94,9 +125,12 @@ impl Recognizer {
         vector: &[f32],
         metadata: &P,
     ) -> Result<u64> {
+        let _span = tracing::trace_span!("Recognizer::vector_db_insert").entered();
+        let start = std::time::Instant::now();
         let ids = self
             .vecdb
             .add_with(std::iter::once((vector.to_vec(), metadata)))?;
+        tracing::trace!(elapsed_ms = ?start.elapsed().as_secs_f64() * 1000.0, "Recognizer::vector_db_insert completed");
         Ok(ids[0])
     }
 
@@ -105,12 +139,18 @@ impl Recognizer {
         query_vector: &[f32],
         k: usize,
     ) -> Result<Vec<object_recognizer_vecdb::Hit<serde_json::Value>>> {
+        let _span = tracing::trace_span!("Recognizer::vector_db_search").entered();
+        let start = std::time::Instant::now();
         let results = self.vecdb.recognize(query_vector.to_vec(), k, 0.0)?;
+        tracing::trace!(elapsed_ms = ?start.elapsed().as_secs_f64() * 1000.0, "Recognizer::vector_db_search completed");
         Ok(results)
     }
 
     pub fn vector_db_save(&self, _path: &str) -> Result<()> {
+        let _span = tracing::trace_span!("Recognizer::vector_db_save").entered();
+        let start = std::time::Instant::now();
         self.vecdb.optimize()?;
+        tracing::trace!(elapsed_ms = ?start.elapsed().as_secs_f64() * 1000.0, "Recognizer::vector_db_save completed");
         Ok(())
     }
 
@@ -119,7 +159,10 @@ impl Recognizer {
         path: &str,
         mode: object_recognizer_vecdb::ImportMode,
     ) -> Result<usize> {
+        let _span = tracing::trace_span!("Recognizer::vector_db_load").entered();
+        let start = std::time::Instant::now();
         let count = self.vecdb.import(path, mode)?;
+        tracing::trace!(elapsed_ms = ?start.elapsed().as_secs_f64() * 1000.0, "Recognizer::vector_db_load completed");
         Ok(count)
     }
 
@@ -127,11 +170,18 @@ impl Recognizer {
         &mut self,
         img: &image::DynamicImage,
         metadata: &P,
-    ) -> Result<u64> {
+    ) -> Result<Vec<u64>> {
+        let _span = tracing::trace_span!("Recognizer::add_training_sample").entered();
+        let start = std::time::Instant::now();
         let segmented = self.segment_subject(img)?;
-        let embedding = self.generate_embedding(&segmented)?;
-        let id = self.vector_db_insert(&embedding, metadata)?;
-        Ok(id)
+        let mut ids = Vec::new();
+        for seg in segmented {
+            let embedding = self.generate_embedding(&seg)?;
+            let id = self.vector_db_insert(&embedding, metadata)?;
+            ids.push(id);
+        }
+        tracing::trace!(elapsed_ms = ?start.elapsed().as_secs_f64() * 1000.0, "Recognizer::add_training_sample completed");
+        Ok(ids)
     }
 
     pub fn classify_image<T: serde::de::DeserializeOwned>(
@@ -140,10 +190,17 @@ impl Recognizer {
         top_n: usize,
         min_score: f32,
     ) -> Result<Vec<object_recognizer_vecdb::Hit<T>>> {
+        let _span = tracing::trace_span!("Recognizer::classify_image").entered();
+        let start = std::time::Instant::now();
         let segmented = self.segment_subject(img)?;
-        let embedding = self.generate_embedding(&segmented)?;
-        let hits = self.vecdb.recognize(embedding, top_n, min_score)?;
-        Ok(hits)
+        let mut best_hits = Vec::new();
+        for seg in segmented {
+            let embedding = self.generate_embedding(&seg)?;
+            let hits = self.vecdb.recognize(embedding, top_n, min_score)?;
+            best_hits.extend(hits);
+        }
+        tracing::trace!(elapsed_ms = ?start.elapsed().as_secs_f64() * 1000.0, "Recognizer::classify_image completed");
+        Ok(best_hits)
     }
 }
 
@@ -151,17 +208,25 @@ pub fn create_segmenter_from_path(
     env: &ort::environment::Environment,
     path: impl AsRef<std::path::Path>,
 ) -> Result<object_recognizer_subject_cutout::Segmenter> {
-    object_recognizer_subject_cutout::Segmenter::from_path_with_env(
+    let _span = tracing::trace_span!("create_segmenter_from_path").entered();
+    let start = std::time::Instant::now();
+    let res = object_recognizer_subject_cutout::Segmenter::from_path_with_env(
         object_recognizer_subject_cutout::Model::U2Net,
         env,
         path,
     )
-    .map_err(Error::Segmenter)
+    .map_err(Error::Segmenter);
+    tracing::trace!(elapsed_ms = ?start.elapsed().as_secs_f64() * 1000.0, "create_segmenter_from_path completed");
+    res
 }
 
 pub fn create_feature_extractor(
     env: &ort::environment::Environment,
 ) -> Result<object_recognizer_feature_extraction::FeatureExtractor> {
-    object_recognizer_feature_extraction::FeatureExtractor::new_embedded_with_env(env)
-        .map_err(Error::FeatureExtraction)
+    let _span = tracing::trace_span!("create_feature_extractor").entered();
+    let start = std::time::Instant::now();
+    let res = object_recognizer_feature_extraction::FeatureExtractor::new_embedded_with_env(env)
+        .map_err(Error::FeatureExtraction);
+    tracing::trace!(elapsed_ms = ?start.elapsed().as_secs_f64() * 1000.0, "create_feature_extractor completed");
+    res
 }
