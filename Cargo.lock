@@ -2218,6 +2218,7 @@ dependencies = [
  "image",
  "imageproc",
  "ndarray",
+ "num_cpus",
  "ort",
  "thiserror 1.0.69",
 ]
@@ -2230,6 +2231,7 @@ dependencies = [
  "image",
  "imageproc",
  "jpeg-decoder",
+ "num_cpus",
  "ort",
  "thiserror 1.0.69",
  "tracing",
@@ -2253,6 +2255,7 @@ dependencies = [
  "anyhow",
  "boltffi",
  "image",
+ "num_cpus",
  "object-recognizer-feature-extraction",
  "object-recognizer-subject-cutout",
  "object-recognizer-vecdb",
