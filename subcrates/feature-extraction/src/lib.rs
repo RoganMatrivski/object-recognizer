@@ -1,7 +1,7 @@
 mod config;
 
 use image::imageops::FilterType;
-use ort::session::Session;
+use ort::session::{Session, builder::GraphOptimizationLevel};
 use ort::value::Tensor;
 use std::path::Path;
 use thiserror::Error;
@@ -10,6 +10,8 @@ use thiserror::Error;
 pub enum ExtractionError {
     #[error("ONNX error: {0}")]
     Ort(#[from] ort::Error),
+    #[error("ONNX builder error: {0}")]
+    OrtBuilder(String),
     #[error("Image error: {0}")]
     Image(#[from] image::ImageError),
     #[error("Invalid output shape or type from model")]
@@ -25,7 +27,16 @@ impl FeatureExtractor {
         env: &ort::environment::Environment,
         model_path: impl AsRef<Path>,
     ) -> Result<Self, ExtractionError> {
-        let session = Session::builder(env)?.commit_from_file(model_path)?;
+        let intra_threads = std::env::var("ORT_INTRA_THREADS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(|| num_cpus::get().min(4));
+        let mut builder = Session::builder(env)?
+            .with_optimization_level(GraphOptimizationLevel::All)
+            .map_err(|e| ExtractionError::OrtBuilder(e.to_string()))?
+            .with_intra_threads(intra_threads)
+            .map_err(|e| ExtractionError::OrtBuilder(e.to_string()))?;
+        let session = builder.commit_from_file(model_path)?;
         Ok(Self { session })
     }
 
@@ -33,7 +44,16 @@ impl FeatureExtractor {
     pub fn new_embedded_with_env(
         env: &ort::environment::Environment,
     ) -> Result<Self, ExtractionError> {
-        let session = Session::builder(env)?.commit_from_memory(config::EMBEDDED_MODEL_BYTES)?;
+        let intra_threads = std::env::var("ORT_INTRA_THREADS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(|| num_cpus::get().min(4));
+        let mut builder = Session::builder(env)?
+            .with_optimization_level(GraphOptimizationLevel::All)
+            .map_err(|e| ExtractionError::OrtBuilder(e.to_string()))?
+            .with_intra_threads(intra_threads)
+            .map_err(|e| ExtractionError::OrtBuilder(e.to_string()))?;
+        let session = builder.commit_from_memory(config::EMBEDDED_MODEL_BYTES)?;
         Ok(Self { session })
     }
 
