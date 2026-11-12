@@ -184,23 +184,95 @@ impl Recognizer {
         Ok(ids)
     }
 
-    pub fn classify_image<T: serde::de::DeserializeOwned>(
+    pub fn into_parts(
+        self,
+    ) -> (
+        Segmenter,
+        object_recognizer_feature_extraction::FeatureExtractor,
+        object_recognizer_vecdb::VecDb,
+        ort::environment::Environment,
+    ) {
+        (self.seg, self.extractor, self.vecdb, self.env)
+    }
+
+    pub fn classify_image<T: serde::de::DeserializeOwned + Send + Sync + 'static + PartialEq>(
         &mut self,
         img: &image::DynamicImage,
         top_n: usize,
         min_score: f32,
     ) -> Result<Vec<object_recognizer_vecdb::Hit<T>>> {
-        let _span = tracing::trace_span!("Recognizer::classify_image").entered();
-        let start = std::time::Instant::now();
         let segmented = self.segment_subject(img)?;
         let mut best_hits = Vec::new();
         for seg in segmented {
             let embedding = self.generate_embedding(&seg)?;
-            let hits = self.vecdb.recognize(embedding, top_n, min_score)?;
+            let hits = self.vecdb.recognize::<T>(embedding, top_n, min_score)?;
             best_hits.extend(hits);
         }
-        tracing::trace!(elapsed_ms = ?start.elapsed().as_secs_f64() * 1000.0, "Recognizer::classify_image completed");
-        Ok(best_hits)
+        Ok(merge_hits(best_hits, top_n))
+    }
+}
+
+pub fn merge_hits<T>(
+    mut hits: Vec<object_recognizer_vecdb::Hit<T>>,
+    top_n: usize,
+) -> Vec<object_recognizer_vecdb::Hit<T>>
+where
+    T: PartialEq,
+{
+    // Sort by score desc
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // Dedupe by id, keeping the best score (which is the first one found)
+    let mut unique_ids = std::collections::HashSet::new();
+    let mut deduped = Vec::new();
+    for hit in hits {
+        if unique_ids.insert(hit.id) {
+            deduped.push(hit);
+        }
+    }
+
+    deduped.truncate(top_n);
+    deduped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use object_recognizer_vecdb::Hit;
+
+    #[test]
+    fn test_merge_hits() {
+        let h1 = Hit {
+            id: 1,
+            score: 0.9,
+            meta: "a",
+        };
+        let h2 = Hit {
+            id: 2,
+            score: 0.8,
+            meta: "b",
+        };
+        let h3 = Hit {
+            id: 1,
+            score: 0.95,
+            meta: "a",
+        };
+        let h4 = Hit {
+            id: 3,
+            score: 0.7,
+            meta: "c",
+        };
+
+        let merged = merge_hits(vec![h1, h2, h3, h4], 2);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].id, 1);
+        assert_eq!(merged[0].score, 0.95);
+        assert_eq!(merged[1].id, 2);
+        assert_eq!(merged[1].score, 0.8);
     }
 }
 
