@@ -27,7 +27,12 @@ use imageproc::{
     morphology::{close, dilate, erode},
     region_labelling::{Connectivity, connected_components},
 };
-use ort::{environment::Environment, inputs, session::Session, value::Value};
+use ort::{
+    environment::Environment,
+    inputs,
+    session::{Session, builder::GraphOptimizationLevel},
+    value::Value,
+};
 use resize::Filter;
 use std::{collections::HashSet, path::Path};
 
@@ -35,7 +40,7 @@ use variables::*;
 
 // U2Net constant, DON'T CHANGE THESE
 
-pub const INPUT_SIZE: u32 = 320;
+pub const INPUT_SIZE: u32 = 256;
 const MEAN: [f32; 3] = [0.485, 0.456, 0.406];
 const STD: [f32; 3] = [0.229, 0.224, 0.225];
 
@@ -43,7 +48,9 @@ const STD: [f32; 3] = [0.229, 0.224, 0.225];
 pub enum Error {
     #[error("inference error: {0}")]
     Inference(#[from] ort::Error),
-    #[error("model {0:?} not embedded; enable the matching `embed-*` feature or use from_path")]
+    #[error("inference builder error: {0}")]
+    Builder(String),
+    #[error("model {0:?} not embedded; enable matching `embed-*` feature or use from_path")]
     NotEmbedded(Model),
     #[error("unexpected model output shape: {0:?}")]
     BadOutput(Vec<usize>),
@@ -66,7 +73,7 @@ pub struct Segmenter {
 fn embedded_bytes(model: Model) -> Result<&'static [u8]> {
     match model {
         #[cfg(feature = "embed-u2net")]
-        Model::U2Net => Ok(include_bytes!("../models/u2net.onnx") as &[u8]),
+        Model::U2Net => Ok(include_bytes!("../models/u2net_int8_256.onnx") as &[u8]),
         #[cfg(feature = "embed-u2netp")]
         Model::U2NetP => Ok(include_bytes!("../models/u2netp.onnx") as &[u8]),
         #[allow(unreachable_patterns)]
@@ -90,18 +97,36 @@ impl Segmenter {
         env: &Environment,
         path: impl AsRef<Path>,
     ) -> Result<Self> {
-        let session = Session::builder(env)?.commit_from_file(path)?;
+        let intra_threads = std::env::var("ORT_INTRA_THREADS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(|| num_cpus::get().min(4));
+        let mut builder = Session::builder(env)?
+            .with_optimization_level(GraphOptimizationLevel::All)
+            .map_err(|e| Error::Builder(e.to_string()))?
+            .with_intra_threads(intra_threads)
+            .map_err(|e| Error::Builder(e.to_string()))?;
+        let session = builder.commit_from_file(path)?;
         Ok(Self { model, session })
     }
 
-    // ---- from raw bytes --------------------------------------------------
+    // ---- raw bytes --------------------------------------------------
 
     pub fn from_bytes(model: Model, bytes: &[u8]) -> Result<Self> {
         Self::from_bytes_with_env(model, &Self::default_env()?, bytes)
     }
 
     pub fn from_bytes_with_env(model: Model, env: &Environment, bytes: &[u8]) -> Result<Self> {
-        let session = Session::builder(env)?.commit_from_memory(bytes)?;
+        let intra_threads = std::env::var("ORT_INTRA_THREADS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_else(|| num_cpus::get().min(4));
+        let mut builder = Session::builder(env)?
+            .with_optimization_level(GraphOptimizationLevel::All)
+            .map_err(|e| Error::Builder(e.to_string()))?
+            .with_intra_threads(intra_threads)
+            .map_err(|e| Error::Builder(e.to_string()))?;
+        let session = builder.commit_from_memory(bytes)?;
         Ok(Self { model, session })
     }
 
@@ -136,7 +161,10 @@ impl Segmenter {
     pub fn new(model: Model) -> Result<Self> {
         match model {
             #[cfg(feature = "embed-u2net")]
-            Model::U2Net => Self::from_bytes(Model::U2Net, include_bytes!("../models/u2net.onnx")),
+            Model::U2Net => Self::from_bytes(
+                Model::U2Net,
+                include_bytes!("../models/u2net_int8_256.onnx"),
+            ),
             #[cfg(feature = "embed-u2netp")]
             Model::U2NetP => {
                 Self::from_bytes(Model::U2NetP, include_bytes!("../models/u2netp.onnx"))
