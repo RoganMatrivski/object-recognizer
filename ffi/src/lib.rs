@@ -12,81 +12,91 @@ pub struct HitDto {
 
 #[export]
 pub struct RecognizerWrapper {
-    inner: std::sync::Mutex<object_recognizer::Recognizer>,
+    seg: parking_lot::Mutex<object_recognizer::subject_cutout::Segmenter>,
+    extractor: parking_lot::Mutex<object_recognizer::feature_extraction::FeatureExtractor>,
+    vecdb: object_recognizer::vecdb::VecDb,
+    _env: ort::environment::Environment,
 }
+
+fn assert_send_sync<T: Send + Sync>() {}
 
 #[export]
 impl RecognizerWrapper {
+    fn from_recognizer(rec: object_recognizer::Recognizer) -> Self {
+        let (seg, extractor, vecdb, _env) = rec.into_parts();
+        Self {
+            seg: parking_lot::Mutex::new(seg),
+            extractor: parking_lot::Mutex::new(extractor),
+            vecdb,
+            _env,
+        }
+    }
+
     pub fn new(segmenter_model_path: String, vecdb_path: String) -> Result<Self, String> {
-        let inner = object_recognizer::Recognizer::new(segmenter_model_path, vecdb_path)
+        assert_send_sync::<RecognizerWrapper>();
+        let rec = object_recognizer::Recognizer::new(segmenter_model_path, vecdb_path)
             .map_err(|e| e.to_string())?;
-        Ok(Self {
-            inner: std::sync::Mutex::new(inner),
-        })
+        Ok(Self::from_recognizer(rec))
     }
 
     pub fn new_embedded(vecdb_path: String) -> Result<Self, String> {
-        let inner =
+        assert_send_sync::<RecognizerWrapper>();
+        let rec =
             object_recognizer::Recognizer::new_embedded(vecdb_path).map_err(|e| e.to_string())?;
-        Ok(Self {
-            inner: std::sync::Mutex::new(inner),
-        })
+        Ok(Self::from_recognizer(rec))
     }
 
     pub fn new_embedded_lite(vecdb_path: String) -> Result<Self, String> {
-        let inner = object_recognizer::Recognizer::new_embedded_lite(vecdb_path)
+        assert_send_sync::<RecognizerWrapper>();
+        let rec = object_recognizer::Recognizer::new_embedded_lite(vecdb_path)
             .map_err(|e| e.to_string())?;
-        Ok(Self {
-            inner: std::sync::Mutex::new(inner),
-        })
+        Ok(Self::from_recognizer(rec))
     }
 
     pub fn new_embedded_default() -> Result<Self, String> {
-        let inner =
+        assert_send_sync::<RecognizerWrapper>();
+        let rec =
             object_recognizer::Recognizer::new_embedded_default().map_err(|e| e.to_string())?;
-        Ok(Self {
-            inner: std::sync::Mutex::new(inner),
-        })
+        Ok(Self::from_recognizer(rec))
     }
 
     pub fn new_default(segmenter_model_path: String) -> Result<Self, String> {
-        let inner = object_recognizer::Recognizer::new_default(segmenter_model_path)
+        assert_send_sync::<RecognizerWrapper>();
+        let rec = object_recognizer::Recognizer::new_default(segmenter_model_path)
             .map_err(|e| e.to_string())?;
-        Ok(Self {
-            inner: std::sync::Mutex::new(inner),
-        })
+        Ok(Self::from_recognizer(rec))
     }
 
     pub fn segment_subject_raw(&self, image_bytes: Vec<u8>) -> Result<Vec<Vec<u8>>, String> {
         let img = image::load_from_memory(&image_bytes).map_err(|e| e.to_string())?;
-        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
-        let cutouts = inner
-            .seg
-            .instance_squares(&img, Some(224))
+        let input = object_recognizer::subject_cutout::Segmenter::prepare_input(&img);
+        let raw = {
+            let mut seg = self.seg.lock();
+            seg.run_raw(input).map_err(|e| e.to_string())?
+        };
+        let soft = object_recognizer::subject_cutout::Segmenter::saliency_from_raw(&raw)
             .map_err(|e| e.to_string())?;
-        let mut out_vec = Vec::new();
-        for cutout in cutouts {
-            // cutout is an RgbImage, .into_raw() consumes it and returns the underlying Vec<u8> of raw pixels with zero copies or encoding
-            out_vec.push(cutout.into_raw());
-        }
-        Ok(out_vec)
+        let cutouts =
+            object_recognizer::subject_cutout::squares_from_saliency(&img, &soft, Some(224))
+                .map_err(|e| e.to_string())?;
+        Ok(cutouts.into_iter().map(|c| c.into_raw()).collect())
     }
 
     pub fn generate_embedding(&self, image_bytes: Vec<u8>) -> Result<Vec<f32>, String> {
         let img = image::load_from_memory(&image_bytes).map_err(|e| e.to_string())?;
-        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
-        let embedding = inner.generate_embedding(&img).map_err(|e| e.to_string())?;
-        Ok(embedding)
+        let input = object_recognizer::feature_extraction::FeatureExtractor::prepare_input(&img);
+        let mut ext = self.extractor.lock();
+        ext.run(input).map_err(|e| e.to_string())
     }
 
     pub fn vector_db_insert(&self, vector: Vec<f32>, metadata_json: String) -> Result<u64, String> {
-        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
         let meta: serde_json::Value =
             serde_json::from_str(&metadata_json).map_err(|e| e.to_string())?;
-        let id = inner
-            .vector_db_insert(&vector, &meta)
+        let ids = self
+            .vecdb
+            .add_with(std::iter::once((vector, meta)))
             .map_err(|e| e.to_string())?;
-        Ok(id)
+        Ok(ids[0])
     }
 
     pub fn vector_db_search(
@@ -94,61 +104,82 @@ impl RecognizerWrapper {
         query_vector: Vec<f32>,
         k: usize,
     ) -> Result<Vec<HitDto>, String> {
-        let inner = self.inner.lock().map_err(|e| e.to_string())?;
-        let hits = inner
-            .vector_db_search(&query_vector, k)
+        let hits = self
+            .vecdb
+            .recognize::<serde_json::Value>(query_vector, k, 0.0)
             .map_err(|e| e.to_string())?;
         let mut dtos = Vec::new();
         for h in hits {
             dtos.push(HitDto {
                 id: h.id,
                 score: h.score,
-                metadata_json: serde_json::to_string(&h.meta).unwrap_or_default(),
+                metadata_json: serde_json::to_string(&h.meta).map_err(|e| e.to_string())?,
             });
         }
         Ok(dtos)
     }
 
     pub fn vector_db_save(&self, path: String) -> Result<(), String> {
-        let inner = self.inner.lock().map_err(|e| e.to_string())?;
-        inner.vector_db_save(&path).map_err(|e| e.to_string())
+        let _ = path;
+        self.vecdb.optimize().map_err(|e| e.to_string())
     }
 
     pub fn vector_db_export(&self, path: String) -> Result<usize, String> {
-        let inner = self.inner.lock().map_err(|e| e.to_string())?;
-        let count = inner.vecdb.export(&path).map_err(|e| e.to_string())?;
+        let count = self.vecdb.export(&path).map_err(|e| e.to_string())?;
         Ok(count)
     }
 
     pub fn vector_db_import(&self, path: String, replace: bool) -> Result<usize, String> {
-        let inner = self.inner.lock().map_err(|e| e.to_string())?;
         let mode = if replace {
-            object_recognizer::object_recognizer_vecdb::ImportMode::Replace
+            object_recognizer::vecdb::ImportMode::Replace
         } else {
-            object_recognizer::object_recognizer_vecdb::ImportMode::Merge
+            object_recognizer::vecdb::ImportMode::Merge
         };
-        let count = inner.vecdb.import(&path, mode).map_err(|e| e.to_string())?;
+        let count = self.vecdb.import(&path, mode).map_err(|e| e.to_string())?;
         Ok(count)
     }
 
     pub fn vector_db_clear(&self) -> Result<(), String> {
-        let inner = self.inner.lock().map_err(|e| e.to_string())?;
-        inner.vecdb.clear().map_err(|e| e.to_string())
+        self.vecdb.clear().map_err(|e| e.to_string())
     }
 
     pub fn add_training_sample(
         &self,
         image_bytes: Vec<u8>,
         metadata_json: String,
-    ) -> Result<u64, String> {
+    ) -> Result<Vec<u64>, String> {
         let img = image::load_from_memory(&image_bytes).map_err(|e| e.to_string())?;
         let meta: serde_json::Value =
             serde_json::from_str(&metadata_json).map_err(|e| e.to_string())?;
-        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
-        let ids = inner
-            .add_training_sample(&img, &meta)
+
+        let input = object_recognizer::subject_cutout::Segmenter::prepare_input(&img);
+        let raw = {
+            let mut seg = self.seg.lock();
+            seg.run_raw(input).map_err(|e| e.to_string())?
+        };
+        let soft = object_recognizer::subject_cutout::Segmenter::saliency_from_raw(&raw)
             .map_err(|e| e.to_string())?;
-        Ok(ids.first().copied().unwrap_or(0))
+        let cutouts =
+            object_recognizer::subject_cutout::squares_from_saliency(&img, &soft, Some(224))
+                .map_err(|e| e.to_string())?;
+
+        let mut embeddings = Vec::new();
+        for cutout in cutouts {
+            let dyn_img = image::DynamicImage::ImageRgb8(cutout);
+            let ext_input =
+                object_recognizer::feature_extraction::FeatureExtractor::prepare_input(&dyn_img);
+            let embedding = {
+                let mut ext = self.extractor.lock();
+                ext.run(ext_input).map_err(|e| e.to_string())?
+            };
+            embeddings.push(embedding);
+        }
+
+        let ids = self
+            .vecdb
+            .add_with(embeddings.into_iter().map(|emb| (emb, meta.clone())))
+            .map_err(|e| e.to_string())?;
+        Ok(ids)
     }
 
     pub fn classify_image(
@@ -158,16 +189,41 @@ impl RecognizerWrapper {
         min_score: f32,
     ) -> Result<Vec<HitDto>, String> {
         let img = image::load_from_memory(&image_bytes).map_err(|e| e.to_string())?;
-        let mut inner = self.inner.lock().map_err(|e| e.to_string())?;
-        let hits: Vec<object_recognizer::object_recognizer_vecdb::Hit<serde_json::Value>> = inner
-            .classify_image(&img, top_n, min_score)
+
+        let input = object_recognizer::subject_cutout::Segmenter::prepare_input(&img);
+        let raw = {
+            let mut seg = self.seg.lock();
+            seg.run_raw(input).map_err(|e| e.to_string())?
+        };
+        let soft = object_recognizer::subject_cutout::Segmenter::saliency_from_raw(&raw)
             .map_err(|e| e.to_string())?;
+        let cutouts =
+            object_recognizer::subject_cutout::squares_from_saliency(&img, &soft, Some(224))
+                .map_err(|e| e.to_string())?;
+
+        let mut best_hits = Vec::new();
+        for cutout in cutouts {
+            let dyn_img = image::DynamicImage::ImageRgb8(cutout);
+            let ext_input =
+                object_recognizer::feature_extraction::FeatureExtractor::prepare_input(&dyn_img);
+            let embedding = {
+                let mut ext = self.extractor.lock();
+                ext.run(ext_input).map_err(|e| e.to_string())?
+            };
+            let hits = self
+                .vecdb
+                .recognize::<serde_json::Value>(embedding, top_n, min_score)
+                .map_err(|e| e.to_string())?;
+            best_hits.extend(hits);
+        }
+
+        let merged = object_recognizer::merge_hits(best_hits, top_n);
         let mut dtos = Vec::new();
-        for h in hits {
+        for h in merged {
             dtos.push(HitDto {
                 id: h.id,
                 score: h.score,
-                metadata_json: serde_json::to_string(&h.meta).unwrap_or_default(),
+                metadata_json: serde_json::to_string(&h.meta).map_err(|e| e.to_string())?,
             });
         }
         Ok(dtos)

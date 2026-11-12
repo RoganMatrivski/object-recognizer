@@ -1,6 +1,6 @@
-pub use object_recognizer_feature_extraction;
-pub use object_recognizer_subject_cutout;
-pub use object_recognizer_vecdb;
+pub use object_recognizer_feature_extraction as feature_extraction;
+pub use object_recognizer_subject_cutout as subject_cutout;
+pub use object_recognizer_vecdb as vecdb;
 
 use object_recognizer_subject_cutout::{Model, Segmenter};
 
