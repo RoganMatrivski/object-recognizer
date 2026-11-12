@@ -8,62 +8,62 @@ mod init;
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-static TEST_DATA: [(&[u8], &str); 16] = [
-    (include_bytes!("../testdata/apple (6).jpg"), "apple (6).jpg"),
-    (
-        include_bytes!("../testdata/bananas (3).jpg"),
-        "bananas (3).jpg",
-    ),
-    (
-        include_bytes!("../testdata/durian (16).jpg"),
-        "durian (16).jpg",
-    ),
-    (
-        include_bytes!("../testdata/durian (5).jpg"),
-        "durian (5).jpg",
-    ),
-    (
-        include_bytes!("../testdata/durians (3).jpg"),
-        "durians (3).jpg",
-    ),
-    (
-        include_bytes!("../testdata/grape - 1 (6).jpg"),
-        "grape - 1 (6).jpg",
-    ),
-    (
-        include_bytes!("../testdata/grape - 2 (4).jpg"),
-        "grape - 2 (4).jpg",
-    ),
-    (
-        include_bytes!("../testdata/grapes (3).jpg"),
-        "grapes (3).jpg",
-    ),
-    (
-        include_bytes!("../testdata/green apple (6).jpg"),
-        "green apple (6).jpg",
-    ),
-    (
-        include_bytes!("../testdata/green peppers (6).jpg"),
-        "green peppers (6).jpg",
-    ),
-    (
-        include_bytes!("../testdata/orange (4).jpg"),
-        "orange (4).jpg",
-    ),
-    (
-        include_bytes!("../testdata/oranges (4).jpg"),
-        "oranges (4).jpg",
-    ),
-    (
-        include_bytes!("../testdata/papaya (7).jpg"),
-        "papaya (7).jpg",
-    ),
-    (include_bytes!("../testdata/pear (4).jpg"), "pear (4).jpg"),
-    (include_bytes!("../testdata/pears (6).jpg"), "pears (6).jpg"),
-    (
-        include_bytes!("../testdata/red peppers (5).jpg"),
-        "red peppers (5).jpg",
-    ),
+static TEST_DATA: [(&[u8], &str); 1] = [
+    (&[0u8], "asdf"), // (include_bytes!("../testdata/apple (6).jpg"), "apple (6).jpg"),
+                      // (
+                      //     include_bytes!("../testdata/bananas (3).jpg"),
+                      //     "bananas (3).jpg",
+                      // ),
+                      // (
+                      //     include_bytes!("../testdata/durian (16).jpg"),
+                      //     "durian (16).jpg",
+                      // ),
+                      // (
+                      //     include_bytes!("../testdata/durian (5).jpg"),
+                      //     "durian (5).jpg",
+                      // ),
+                      // (
+                      //     include_bytes!("../testdata/durians (3).jpg"),
+                      //     "durians (3).jpg",
+                      // ),
+                      // (
+                      //     include_bytes!("../testdata/grape - 1 (6).jpg"),
+                      //     "grape - 1 (6).jpg",
+                      // ),
+                      // (
+                      //     include_bytes!("../testdata/grape - 2 (4).jpg"),
+                      //     "grape - 2 (4).jpg",
+                      // ),
+                      // (
+                      //     include_bytes!("../testdata/grapes (3).jpg"),
+                      //     "grapes (3).jpg",
+                      // ),
+                      // (
+                      //     include_bytes!("../testdata/green apple (6).jpg"),
+                      //     "green apple (6).jpg",
+                      // ),
+                      // (
+                      //     include_bytes!("../testdata/green peppers (6).jpg"),
+                      //     "green peppers (6).jpg",
+                      // ),
+                      // (
+                      //     include_bytes!("../testdata/orange (4).jpg"),
+                      //     "orange (4).jpg",
+                      // ),
+                      // (
+                      //     include_bytes!("../testdata/oranges (4).jpg"),
+                      //     "oranges (4).jpg",
+                      // ),
+                      // (
+                      //     include_bytes!("../testdata/papaya (7).jpg"),
+                      //     "papaya (7).jpg",
+                      // ),
+                      // (include_bytes!("../testdata/pear (4).jpg"), "pear (4).jpg"),
+                      // (include_bytes!("../testdata/pears (6).jpg"), "pears (6).jpg"),
+                      // (
+                      //     include_bytes!("../testdata/red peppers (5).jpg"),
+                      //     "red peppers (5).jpg",
+                      // ),
 ];
 
 #[tracing::instrument]

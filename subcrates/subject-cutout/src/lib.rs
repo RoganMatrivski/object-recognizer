@@ -174,17 +174,9 @@ impl Segmenter {
         }
     }
 
-    /// Raw saliency map at model resolution (INPUT_SIZE x INPUT_SIZE), 0..=255.
-    pub fn mask_small(&mut self, img: &DynamicImage) -> Result<GrayImage> {
-        let _span = tracing::trace_span!("Segmenter::mask_small").entered();
-        let start = std::time::Instant::now();
-        // Triangle is far cheaper than Lanczos3 on big photos and plenty for a
-        // 320x320 model input. (`fast-resize` feature: SIMD backend.)
-        let resize_start = std::time::Instant::now();
+    /// Prepare input tensor data from a dynamic image (resize, normalize, NCHW layout). Pure, no `self`.
+    pub fn prepare_input(img: &DynamicImage) -> Vec<f32> {
         let small = resize::rgb(img, INPUT_SIZE, INPUT_SIZE, Filter::Triangle);
-        let resize_ms = resize_start.elapsed().as_secs_f64() * 1000.0;
-
-        let prep_start = std::time::Instant::now();
         let max = small.as_raw().iter().copied().max().unwrap_or(1).max(1) as f32;
         let n = (INPUT_SIZE * INPUT_SIZE) as usize;
         let mut data = vec![0f32; 3 * n];
@@ -193,36 +185,55 @@ impl Segmenter {
                 data[c * n + i] = (px[c] as f32 / max - MEAN[c]) / STD[c];
             }
         }
+        data
+    }
+
+    /// Run raw inference on prepared input. Only part needing `&mut self`.
+    pub fn run_raw(&mut self, input: Vec<f32>) -> Result<Vec<f32>> {
+        let n = (INPUT_SIZE * INPUT_SIZE) as usize;
         let input_tensor =
-            Value::from_array((vec![1, 3, INPUT_SIZE as usize, INPUT_SIZE as usize], data))?;
-        let prep_ms = prep_start.elapsed().as_secs_f64() * 1000.0;
-
-        let infer_start = std::time::Instant::now();
+            Value::from_array((vec![1, 3, INPUT_SIZE as usize, INPUT_SIZE as usize], input))?;
         let outputs = self.session.run(inputs!["input.1" => input_tensor])?;
-        let infer_ms = infer_start.elapsed().as_secs_f64() * 1000.0;
-
-        let post_start = std::time::Instant::now();
-        // Extract the first output tensor
         let (shape, data) = outputs[0].try_extract_tensor::<f32>()?;
         let shape_vec = shape.iter().map(|&s| s as usize).collect::<Vec<_>>();
-
         if data.len() != n {
             return Err(Error::BadOutput(shape_vec));
         }
+        Ok(data.to_vec())
+    }
 
-        let (mn, mx) = data
+    /// Compute saliency map from raw inference output (min-max normalization and early-out). Pure.
+    pub fn saliency_from_raw(raw: &[f32]) -> Result<GrayImage> {
+        let (mn, mx) = raw
             .iter()
             .fold((f32::MAX, f32::MIN), |(a, b), &v| (a.min(v), b.max(v)));
-        // Flat output = no subject. Without this, the min-max below would stretch
-        // noise into a fake subject.
         if mx - mn < MIN_SALIENCY_RANGE {
             return Ok(GrayImage::new(INPUT_SIZE, INPUT_SIZE));
         }
         let range = (mx - mn).max(1e-6);
-        let bytes = data
+        let bytes = raw
             .iter()
             .map(|&v| (((v - mn) / range) * 255.0).round().clamp(0.0, 255.0) as u8)
             .collect();
+        Ok(GrayImage::from_raw(INPUT_SIZE, INPUT_SIZE, bytes).unwrap())
+    }
+
+    /// Raw saliency map at model resolution (INPUT_SIZE x INPUT_SIZE), 0..=255.
+    pub fn mask_small(&mut self, img: &DynamicImage) -> Result<GrayImage> {
+        let _span = tracing::trace_span!("Segmenter::mask_small").entered();
+        let start = std::time::Instant::now();
+        let resize_start = std::time::Instant::now();
+        let prep_start = std::time::Instant::now();
+        let input = Self::prepare_input(img);
+        let prep_ms = prep_start.elapsed().as_secs_f64() * 1000.0;
+        let resize_ms = resize_start.elapsed().as_secs_f64() * 1000.0;
+
+        let infer_start = std::time::Instant::now();
+        let raw = self.run_raw(input)?;
+        let infer_ms = infer_start.elapsed().as_secs_f64() * 1000.0;
+
+        let post_start = std::time::Instant::now();
+        let res = Self::saliency_from_raw(&raw)?;
         let post_ms = post_start.elapsed().as_secs_f64() * 1000.0;
         let total_ms = start.elapsed().as_secs_f64() * 1000.0;
 
@@ -235,7 +246,7 @@ impl Segmenter {
             "Segmenter::mask_small detailed breakdown"
         );
 
-        Ok(GrayImage::from_raw(INPUT_SIZE, INPUT_SIZE, bytes).unwrap())
+        Ok(res)
     }
 
     /// 255 = subject, 0 = background, at the input image's size.
@@ -303,50 +314,8 @@ impl Segmenter {
     /// Everything except the final per-subject crop runs on 320x320 data, so cost
     /// no longer scales with photo resolution x subject count.
     pub fn instance_cutout(&mut self, img: &DynamicImage) -> Result<Vec<RgbaImage>> {
-        let (w, h) = (img.width(), img.height());
         let soft = self.mask_small(img)?;
-        let solid = solidify(&soft);
-        let min_area = (INPUT_SIZE * INPUT_SIZE) / MIN_AREA_DIVISOR;
-        let s = INPUT_SIZE as u64;
-        let lut = smoothstep_lut(EDGE_LO, EDGE_HI);
-        // Approx. width of the soft edge in photo pixels (~2 model pixels).
-        let band_px = 2 * w.max(h).div_ceil(INPUT_SIZE);
-
-        let mut out = Vec::new();
-        for part in split_instances(&solid, min_area) {
-            let part = fill_holes(&part);
-            let Some((x0, y0, x1, y1)) = mask_bbox(&part) else {
-                continue;
-            };
-            // Pad by EDGE_RADIUS so the soft edge can fade out inside the crop.
-            // (x1, y1) become exclusive bounds here.
-            let pad = EDGE_RADIUS as u32;
-            let (x0, y0) = (x0.saturating_sub(pad), y0.saturating_sub(pad));
-            let (x1, y1) = (
-                (x1 + 1 + pad).min(INPUT_SIZE),
-                (y1 + 1 + pad).min(INPUT_SIZE),
-            );
-
-            // Model-space box -> photo-space box.
-            let ox0 = (x0 as u64 * w as u64 / s) as u32;
-            let oy0 = (y0 as u64 * h as u64 / s) as u32;
-            let ox1 = ((x1 as u64 * w as u64).div_ceil(s) as u32).min(w);
-            let oy1 = ((y1 as u64 * h as u64).div_ceil(s) as u32).min(h);
-            let (cw, ch) = (ox1 - ox0, oy1 - oy0);
-            if cw == 0 || ch == 0 {
-                continue;
-            }
-
-            let crop = img.crop_imm(ox0, oy0, cw, ch);
-            let alpha = instance_alpha(&soft, &part);
-            let m = image::imageops::crop_imm(&alpha, x0, y0, x1 - x0, y1 - y0).to_image();
-            let mut m = resize::gray(&m, cw, ch, Filter::CatmullRom);
-            m.pixels_mut().for_each(|p| p[0] = lut[p[0] as usize]);
-            let mut rgba = apply_mask(&crop, &m);
-            bleed_edges(&mut rgba, band_px);
-            out.push(rgba);
-        }
-        Ok(out)
+        cutouts_from_saliency(img, &soft)
     }
 
     /// `instance_cutout`, then each subject centred on a square `SQUARE_BG` canvas
@@ -357,12 +326,71 @@ impl Segmenter {
         img: &DynamicImage,
         side: Option<u32>,
     ) -> Result<Vec<RgbImage>> {
-        Ok(self
-            .instance_cutout(img)?
+        let soft = self.mask_small(img)?;
+        Ok(cutouts_from_saliency(img, &soft)?
             .iter()
             .map(|c| square_on(c, SQUARE_BG, side))
             .collect())
     }
+}
+
+/// Compute instance cutouts directly from a pre-computed soft saliency mask and the original image.
+pub fn cutouts_from_saliency(img: &DynamicImage, soft: &GrayImage) -> Result<Vec<RgbaImage>> {
+    let (w, h) = (img.width(), img.height());
+    let solid = solidify(soft);
+    let min_area = (INPUT_SIZE * INPUT_SIZE) / MIN_AREA_DIVISOR;
+    let s = INPUT_SIZE as u64;
+    let lut = smoothstep_lut(EDGE_LO, EDGE_HI);
+    // Approx. width of the soft edge in photo pixels (~2 model pixels).
+    let band_px = 2 * w.max(h).div_ceil(INPUT_SIZE);
+
+    let mut out = Vec::new();
+    for part in split_instances(&solid, min_area) {
+        let part = fill_holes(&part);
+        let Some((x0, y0, x1, y1)) = mask_bbox(&part) else {
+            continue;
+        };
+        // Pad by EDGE_RADIUS so the soft edge can fade out inside the crop.
+        // (x1, y1) become exclusive bounds here.
+        let pad = EDGE_RADIUS as u32;
+        let (x0, y0) = (x0.saturating_sub(pad), y0.saturating_sub(pad));
+        let (x1, y1) = (
+            (x1 + 1 + pad).min(INPUT_SIZE),
+            (y1 + 1 + pad).min(INPUT_SIZE),
+        );
+
+        // Model-space box -> photo-space box.
+        let ox0 = (x0 as u64 * w as u64 / s) as u32;
+        let oy0 = (y0 as u64 * h as u64 / s) as u32;
+        let ox1 = ((x1 as u64 * w as u64).div_ceil(s) as u32).min(w);
+        let oy1 = ((y1 as u64 * h as u64).div_ceil(s) as u32).min(h);
+        let (cw, ch) = (ox1 - ox0, oy1 - oy0);
+        if cw == 0 || ch == 0 {
+            continue;
+        }
+
+        let crop = img.crop_imm(ox0, oy0, cw, ch);
+        let alpha = instance_alpha(soft, &part);
+        let m = image::imageops::crop_imm(&alpha, x0, y0, x1 - x0, y1 - y0).to_image();
+        let mut m = resize::gray(&m, cw, ch, Filter::CatmullRom);
+        m.pixels_mut().for_each(|p| p[0] = lut[p[0] as usize]);
+        let mut rgba = apply_mask(&crop, &m);
+        bleed_edges(&mut rgba, band_px);
+        out.push(rgba);
+    }
+    Ok(out)
+}
+
+/// Compute square object images directly from the original image and a pre-computed soft saliency mask.
+pub fn squares_from_saliency(
+    img: &DynamicImage,
+    soft: &GrayImage,
+    side: Option<u32>,
+) -> Result<Vec<RgbImage>> {
+    Ok(cutouts_from_saliency(img, soft)?
+        .iter()
+        .map(|c| square_on(c, SQUARE_BG, side))
+        .collect())
 }
 
 /// Centre a cutout on a square canvas filled with `bg`, alpha-blending the subject
@@ -712,6 +740,15 @@ mod tests {
         assert_eq!(lut[0], 0);
         assert_eq!(lut[255], 255);
         assert!(lut.windows(2).all(|w| w[0] <= w[1]));
+    }
+
+    #[test]
+    fn instance_squares_consistency() {
+        let img = DynamicImage::ImageRgb8(RgbImage::new(INPUT_SIZE, INPUT_SIZE));
+        let soft = GrayImage::new(INPUT_SIZE, INPUT_SIZE);
+        let squares1 = squares_from_saliency(&img, &soft, None).unwrap();
+        let squares2 = squares_from_saliency(&img, &soft, None).unwrap();
+        assert_eq!(squares1.len(), squares2.len());
     }
 
     #[test]
