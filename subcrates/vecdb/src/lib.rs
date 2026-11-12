@@ -7,6 +7,8 @@ use std::{
     fs::{self, File},
     io::{BufRead, BufReader, BufWriter, Write},
     path::{Path, PathBuf},
+    sync::Mutex,
+    sync::RwLock,
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -139,6 +141,8 @@ pub struct VecDb {
     shard: EdgeShard,
     next_id: AtomicU64,
     id_file: PathBuf,
+    write_lock: Mutex<()>,
+    rw_gate: RwLock<()>,
 }
 
 impl VecDb {
@@ -172,6 +176,8 @@ impl VecDb {
             shard,
             next_id: AtomicU64::new(next),
             id_file,
+            write_lock: Mutex::new(()),
+            rw_gate: RwLock::new(()),
         })
     }
 
@@ -187,6 +193,7 @@ impl VecDb {
         &self,
         items: impl IntoIterator<Item = (Vec<f32>, P)>,
     ) -> Result<Vec<u64>> {
+        let _guard = self.write_lock.lock().unwrap();
         let mut ids = Vec::new();
         let mut points: Vec<PointStructPersisted> = Vec::new();
         for (vec, payload) in items {
@@ -202,11 +209,15 @@ impl VecDb {
                 .into(),
             );
         }
+        if points.is_empty() {
+            return Ok(ids);
+        }
+
         self.upsert_points(points)?;
-        fs::write(
-            &self.id_file,
-            self.next_id.load(Ordering::SeqCst).to_string(),
-        )?;
+        let val = self.next_id.load(Ordering::SeqCst).to_string();
+        let tmp = self.id_file.with_extension("tmp");
+        fs::write(&tmp, val)?;
+        fs::rename(&tmp, &self.id_file)?;
         Ok(ids)
     }
 
@@ -231,6 +242,7 @@ impl VecDb {
         limit: usize,
         filter: Option<Filter>,
     ) -> Result<Vec<ScoredPoint>> {
+        let _guard = self.rw_gate.read().unwrap();
         check_dim(&query)?;
         let mut req = QueryRequestBuilder::new(limit)
             .query(ScoringQuery::Vector(QueryEnum::Nearest(NamedQuery {
@@ -454,7 +466,9 @@ impl VecDb {
                 self.add_with(rows.into_iter().map(|r| (r.vector, r.payload)))?;
             }
             ImportMode::Replace => {
-                self.clear()?;
+                let _write_guard = self.write_lock.lock().unwrap();
+                let _gate_guard = self.rw_gate.write().unwrap();
+                self.clear_internal()?;
                 let max_id = rows.iter().map(|r| r.id).max();
                 let points: Vec<PointStructPersisted> = rows
                     .into_iter()
@@ -472,19 +486,24 @@ impl VecDb {
                 }
                 if let Some(m) = max_id {
                     self.next_id.fetch_max(m + 1, Ordering::SeqCst);
-                    fs::write(
-                        &self.id_file,
-                        self.next_id.load(Ordering::SeqCst).to_string(),
-                    )?;
                 }
+                let val = self.next_id.load(Ordering::SeqCst).to_string();
+                let tmp = self.id_file.with_extension("tmp");
+                fs::write(&tmp, val)?;
+                fs::rename(&tmp, &self.id_file)?;
             }
         }
         self.optimize()?;
         Ok(n)
     }
 
-    /// Deletes every point.
+    /// Deletes all points.
     pub fn clear(&self) -> Result<()> {
+        let _gate_guard = self.rw_gate.write().unwrap();
+        self.clear_internal()
+    }
+
+    fn clear_internal(&self) -> Result<()> {
         let mut offset: Option<PointId> = None;
         loop {
             let mut req = ScrollRequestBuilder::new()
@@ -514,6 +533,48 @@ impl VecDb {
             PointOperations::UpsertPoints(PointInsertOperations::PointsList(points)),
         ))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn assert_sync() {
+        fn is_sync<T: Sync>() {}
+        is_sync::<VecDb>();
+    }
+
+    #[test]
+    fn concurrent_add_with_produces_unique_ids() {
+        use std::sync::Arc;
+        let dir = std::env::temp_dir().join(format!("vecdb-concurrent-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let db = Arc::new(VecDb::open(&dir).unwrap());
+
+        let mut handles = vec![];
+        for _ in 0..8 {
+            let db = Arc::clone(&db);
+            handles.push(std::thread::spawn(move || {
+                db.add_with([(vec![0.0; VECTOR_DIM], serde_json::json!({"test": true}))])
+                    .unwrap()
+            }));
+        }
+
+        let mut all_ids = vec![];
+        for h in handles {
+            all_ids.extend(h.join().unwrap());
+        }
+        all_ids.sort();
+        all_ids.dedup();
+        assert_eq!(all_ids.len(), 8);
+
+        // Reopen and check next_id
+        let next_val = db.next_id.load(Ordering::SeqCst);
+        drop(db);
+        let db2 = VecDb::open(&dir).unwrap();
+        assert!(db2.next_id.load(Ordering::SeqCst) >= next_val);
     }
 }
 
