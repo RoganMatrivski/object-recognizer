@@ -1,5 +1,8 @@
 pub use boltffi::*;
 
+#[cfg(test)]
+mod concurrency_tests;
+
 boltffi::scaffolding!();
 
 #[data]

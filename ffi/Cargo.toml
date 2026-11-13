@@ -10,7 +10,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 boltffi = "0.32.1"
 image.workspace = true
 object_recognizer = { version = "0.1.0", path = "..", features = ["embed-u2net", "embed-u2netp", "embed-model"] }
-ort = "2.0.0-rc.15"
+ort = {workspace = true, features = ["load-dynamic"]}
 parking_lot = "0.12.3"
 serde = "1.0.229"
 serde_json = "1.0.154"
