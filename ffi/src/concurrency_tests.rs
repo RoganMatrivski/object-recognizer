@@ -1,6 +1,6 @@
 use crate::RecognizerWrapper;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 fn dummy_image_bytes() -> Vec<u8> {
@@ -11,9 +11,18 @@ fn dummy_image_bytes() -> Vec<u8> {
     bytes
 }
 
+fn test_wrapper(name: &str) -> RecognizerWrapper {
+    let vecdb_path = std::env::temp_dir().join(format!(
+        "object-recognizer-ffi-{name}-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&vecdb_path);
+    RecognizerWrapper::new_embedded(vecdb_path.to_string_lossy().into_owned()).unwrap()
+}
+
 #[test]
 fn test_search_not_blocked_by_classify() {
-    let wrapper = Arc::new(RecognizerWrapper::new_embedded_default().unwrap());
+    let wrapper = Arc::new(test_wrapper("search-not-blocked"));
     let img = dummy_image_bytes();
 
     wrapper
@@ -62,7 +71,7 @@ fn test_search_not_blocked_by_classify() {
 
 #[test]
 fn test_soak_concurrency() {
-    let wrapper = Arc::new(RecognizerWrapper::new_embedded_default().unwrap());
+    let wrapper = Arc::new(test_wrapper("soak"));
     let img = dummy_image_bytes();
     let running = Arc::new(AtomicBool::new(true));
     let mut handles = vec![];
