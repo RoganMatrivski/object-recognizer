@@ -27,14 +27,10 @@ impl FeatureExtractor {
         env: &ort::environment::Environment,
         commit_fn: impl FnOnce(&mut ort::session::builder::SessionBuilder) -> ort::Result<Session>,
     ) -> Result<Self, ExtractionError> {
-        let intra_threads = std::env::var("ORT_INTRA_THREADS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or_else(|| num_cpus::get().min(4));
         let mut builder = Session::builder(env)?
             .with_optimization_level(GraphOptimizationLevel::All)
             .map_err(|e| ExtractionError::OrtBuilder(e.to_string()))?
-            .with_intra_threads(intra_threads)
+            .with_intra_threads(object_recognizer_runtime_config::intra_threads())
             .map_err(|e| ExtractionError::OrtBuilder(e.to_string()))?;
         let session = commit_fn(&mut builder)?;
         Ok(Self { session })

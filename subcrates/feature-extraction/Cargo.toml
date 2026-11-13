@@ -9,7 +9,7 @@ thiserror = { workspace = true }
 image = { workspace = true }
 imageproc = { workspace = true }
 ndarray = "0.17"
-num_cpus = "1.17"
+object-recognizer-runtime-config = { workspace = true }
 
 [features]
 default = []

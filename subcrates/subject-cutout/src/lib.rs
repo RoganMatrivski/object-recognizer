@@ -2,9 +2,9 @@
 //!
 //! | function              | runs at          | cost                          |
 //! |-----------------------|------------------|-------------------------------|
-//! | `mask_small`          | 320x320          | model run + cheap             |
-//! | `solid_mask_small`    | 320x320          | cheap                         |
-//! | `instance_cutout`     | 320x320, then a  | cheap: scales with subject    |
+//! | `mask_small`          | 256x256          | model run + cheap             |
+//! | `solid_mask_small`    | 256x256          | cheap                         |
+//! | `instance_cutout`     | 256x256, then a  | cheap: scales with subject    |
 //! |                       | crop per subject | size, not photo size          |
 //! | `mask_full`           | full photo       | slow: Lanczos3 upscale        |
 //! | `cutout_full`         | full photo       | slow                          |
@@ -97,14 +97,10 @@ impl Segmenter {
         env: &Environment,
         path: impl AsRef<Path>,
     ) -> Result<Self> {
-        let intra_threads = std::env::var("ORT_INTRA_THREADS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or_else(|| num_cpus::get().min(4));
         let mut builder = Session::builder(env)?
             .with_optimization_level(GraphOptimizationLevel::All)
             .map_err(|e| Error::Builder(e.to_string()))?
-            .with_intra_threads(intra_threads)
+            .with_intra_threads(object_recognizer_runtime_config::intra_threads())
             .map_err(|e| Error::Builder(e.to_string()))?;
         let session = builder.commit_from_file(path)?;
         Ok(Self { model, session })
@@ -117,14 +113,10 @@ impl Segmenter {
     }
 
     pub fn from_bytes_with_env(model: Model, env: &Environment, bytes: &[u8]) -> Result<Self> {
-        let intra_threads = std::env::var("ORT_INTRA_THREADS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or_else(|| num_cpus::get().min(4));
         let mut builder = Session::builder(env)?
             .with_optimization_level(GraphOptimizationLevel::All)
             .map_err(|e| Error::Builder(e.to_string()))?
-            .with_intra_threads(intra_threads)
+            .with_intra_threads(object_recognizer_runtime_config::intra_threads())
             .map_err(|e| Error::Builder(e.to_string()))?;
         let session = builder.commit_from_memory(bytes)?;
         Ok(Self { model, session })
@@ -268,7 +260,7 @@ impl Segmenter {
     }
 
     /// Binary (0/255) subject mask with cracks bridged and enclosed holes filled, at
-    /// model resolution (320x320). Use this for geometry (connectivity, bounding
+    /// model resolution (256x256). Use this for geometry (connectivity, bounding
     /// boxes), not for soft alpha. Cheap.
     pub fn solid_mask_small(&mut self, img: &DynamicImage) -> Result<GrayImage> {
         let soft = self.mask_small(img)?;
@@ -311,7 +303,7 @@ impl Segmenter {
     /// 5. replace colors of semi-transparent edge pixels with nearby interior colors
     ///    (no background halo)
     ///
-    /// Everything except the final per-subject crop runs on 320x320 data, so cost
+    /// Everything except the final per-subject crop runs on 256x256 data, so cost
     /// no longer scales with photo resolution x subject count.
     pub fn instance_cutout(&mut self, img: &DynamicImage) -> Result<Vec<RgbaImage>> {
         let soft = self.mask_small(img)?;

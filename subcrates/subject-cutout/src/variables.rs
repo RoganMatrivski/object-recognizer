@@ -46,7 +46,7 @@ pub const BLEED_GRID_MAX: u32 = 512;
 /// Only used with the `jpeg-scaled` feature. JPEGs are decoded at the largest
 /// 1/2, 1/4 or 1/8 reduction whose shorter side is still >= this (pixels). Cutouts
 /// come out at this reduced size, so raise it if you need bigger crops. The model
-/// itself only sees 320x320, so ~640 leaves headroom. 0 is not allowed: use >= 1.
+/// itself only sees 256x256, so ~640 leaves headroom. 0 is not allowed: use >= 1.
 pub const JPEG_MIN_SIDE: u16 = 640;
 
 /// Background colour the cutouts are flattened onto when squared up (`square_on`,

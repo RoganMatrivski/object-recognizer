@@ -8,7 +8,7 @@ image = { workspace = true }
 imageproc = { workspace = true }
 ort = { workspace = true }
 thiserror = { workspace = true }
-num_cpus = "1.17"
+object-recognizer-runtime-config = { workspace = true }
 fast_image_resize = { version = "5", optional = true }
 jpeg-decoder = { version = "0.3", optional = true }
 tracing = "0.1"

@@ -33,7 +33,6 @@ impl Recognizer {
     fn from_parts(
         env: ort::environment::Environment,
         seg: Segmenter,
-        _segmenter_model_path: impl AsRef<std::path::Path>,
         vecdb_path: impl AsRef<std::path::Path>,
     ) -> Result<Self> {
         let _span = tracing::trace_span!("Recognizer::from_parts").entered();
@@ -56,8 +55,8 @@ impl Recognizer {
         let _span = tracing::trace_span!("Recognizer::new").entered();
         let start = std::time::Instant::now();
         let env = ort::init().build()?;
-        let seg = create_segmenter_from_path(&env, &segmenter_model_path)?;
-        let res = Self::from_parts(env, seg, segmenter_model_path, vecdb_path);
+        let seg = create_segmenter_from_path(Model::U2Net, &env, &segmenter_model_path)?;
+        let res = Self::from_parts(env, seg, vecdb_path);
         tracing::trace!(elapsed_ms = ?start.elapsed().as_secs_f64() * 1000.0, "Recognizer::new completed");
         res
     }
@@ -71,7 +70,7 @@ impl Recognizer {
         let start = std::time::Instant::now();
         let env = ort::init().build()?;
         let seg = Segmenter::embedded_with_env(Model::U2Net, &env)?;
-        let res = Self::from_parts(env, seg, "", vecdb_path);
+        let res = Self::from_parts(env, seg, vecdb_path);
         tracing::trace!(elapsed_ms = ?start.elapsed().as_secs_f64() * 1000.0, "Recognizer::new_embedded completed");
         res
     }
@@ -81,7 +80,7 @@ impl Recognizer {
         let start = std::time::Instant::now();
         let env = ort::init().build()?;
         let seg = Segmenter::embedded_with_env(Model::U2NetP, &env)?;
-        let res = Self::from_parts(env, seg, "", vecdb_path);
+        let res = Self::from_parts(env, seg, vecdb_path);
         tracing::trace!(elapsed_ms = ?start.elapsed().as_secs_f64() * 1000.0, "Recognizer::new_embedded_lite completed");
         res
     }
@@ -277,17 +276,14 @@ mod tests {
 }
 
 pub fn create_segmenter_from_path(
+    model: Model,
     env: &ort::environment::Environment,
     path: impl AsRef<std::path::Path>,
 ) -> Result<object_recognizer_subject_cutout::Segmenter> {
     let _span = tracing::trace_span!("create_segmenter_from_path").entered();
     let start = std::time::Instant::now();
-    let res = object_recognizer_subject_cutout::Segmenter::from_path_with_env(
-        object_recognizer_subject_cutout::Model::U2Net,
-        env,
-        path,
-    )
-    .map_err(Error::Segmenter);
+    let res = object_recognizer_subject_cutout::Segmenter::from_path_with_env(model, env, path)
+        .map_err(Error::Segmenter);
     tracing::trace!(elapsed_ms = ?start.elapsed().as_secs_f64() * 1000.0, "create_segmenter_from_path completed");
     res
 }
