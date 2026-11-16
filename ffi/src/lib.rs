@@ -187,13 +187,48 @@ impl RecognizerWrapper {
         Ok(dtos)
     }
 
-    pub fn vector_db_save(&self, path: String) -> Result<(), String> {
-        let _ = path;
-        self.vecdb.optimize().map_err(|e| e.to_string())
+    pub fn vector_db_len(&self) -> Result<usize, RecognizerError> {
+        self.vecdb.count().map_err(RecognizerError::vector_db)
     }
 
-    pub fn vector_db_export(&self, path: String) -> Result<usize, String> {
-        let count = self.vecdb.export(&path).map_err(|e| e.to_string())?;
+    pub fn vector_db_count_by(&self, key: String) -> Result<Vec<KeyCount>, RecognizerError> {
+        self.vecdb
+            .count_by_field(&key)
+            .map(|counts| {
+                counts
+                    .into_iter()
+                    .map(|(value, count)| KeyCount { value, count })
+                    .collect()
+            })
+            .map_err(RecognizerError::vector_db)
+    }
+
+    pub fn vector_db_delete_by_id(&self, id: u64) -> Result<bool, RecognizerError> {
+        self.vecdb
+            .delete_by_id(id)
+            .map_err(RecognizerError::vector_db)
+    }
+
+    pub fn vector_db_delete_where(
+        &self,
+        key: String,
+        value: String,
+    ) -> Result<usize, RecognizerError> {
+        self.vecdb
+            .delete_where(&key, value)
+            .map_err(RecognizerError::vector_db)
+    }
+
+    pub fn vector_db_save(&self, path: String) -> Result<(), RecognizerError> {
+        let _ = path;
+        self.vecdb.optimize().map_err(RecognizerError::vector_db)
+    }
+
+    pub fn vector_db_export(&self, path: String) -> Result<usize, RecognizerError> {
+        let count = self
+            .vecdb
+            .export(&path)
+            .map_err(RecognizerError::vector_db)?;
         Ok(count)
     }
 
