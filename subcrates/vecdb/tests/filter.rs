@@ -1,4 +1,4 @@
-use object_recognizer_vecdb::{VECTOR_DIM, VecDb, all_of, any_of, eq, none_of};
+use object_recognizer_vecdb::{all_of, any_of, eq, none_of, VecDb, VECTOR_DIM};
 use serde::Deserialize;
 use serde_json::json;
 use std::path::PathBuf;
@@ -56,6 +56,23 @@ fn delete_where_removes_all_samples_of_one_object() -> anyhow::Result<()> {
     assert!(db.recognize::<Meta>(axis(1), 5, 0.8)?.is_empty());
     assert_eq!(db.recognize::<Meta>(axis(2), 1, 0.8)?[0].meta.name, "pen");
     assert_eq!(db.delete_where("name", "does-not-exist")?, 0);
+    Ok(())
+}
+
+#[test]
+fn count_by_field_and_delete_by_id() -> anyhow::Result<()> {
+    let db = seeded("count-by-delete-id");
+    assert_eq!(
+        db.count_by_field("name")?,
+        vec![
+            ("lamp".to_string(), 1),
+            ("mug".to_string(), 2),
+            ("pen".to_string(), 1),
+        ]
+    );
+    assert!(db.delete_by_id(0)?);
+    assert!(!db.delete_by_id(0)?);
+    assert_eq!(db.count()?, 3);
     Ok(())
 }
 

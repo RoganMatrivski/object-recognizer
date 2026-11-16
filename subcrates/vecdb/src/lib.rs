@@ -1,15 +1,16 @@
 use anyhow::Result;
-use flate2::{Compression, read::GzDecoder, write::GzEncoder};
+use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use qdrant_edge::*;
 pub use qdrant_edge::{Condition, Filter, Match};
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     fs::{self, File},
     io::{BufRead, BufReader, BufWriter, Write},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
     sync::Mutex,
     sync::RwLock,
-    sync::atomic::{AtomicU64, Ordering},
 };
 
 // ---- Define your schema once, here ----
@@ -299,6 +300,11 @@ impl VecDb {
     }
 
     pub fn delete(&self, ids: &[u64]) -> Result<()> {
+        let _guard = self.write_lock.lock().unwrap();
+        self.delete_internal(ids)
+    }
+
+    fn delete_internal(&self, ids: &[u64]) -> Result<()> {
         self.shard.update(UpdateOperation::PointOperation(
             PointOperations::DeletePoints {
                 ids: ids.iter().map(|i| PointId::NumId(*i)).collect(),
@@ -307,9 +313,25 @@ impl VecDb {
         Ok(())
     }
 
+    pub fn delete_by_id(&self, id: u64) -> Result<bool> {
+        let _guard = self.write_lock.lock().unwrap();
+        let records = self.shard.retrieve(
+            RetrieveRequestBuilder::new(vec![PointId::NumId(id)])
+                .with_payload(WithPayloadInterface::Bool(false))
+                .with_vector(WithVector::Bool(false))
+                .build(),
+        )?;
+        if records.is_empty() {
+            return Ok(false);
+        }
+        self.delete_internal(&[id])?;
+        Ok(true)
+    }
+
     /// Deletes every point matching `filter`; returns how many were deleted.
     /// (Space is reclaimed on the next `optimize`.)
     pub fn delete_by_filter(&self, filter: Filter) -> Result<usize> {
+        let _guard = self.write_lock.lock().unwrap();
         let n = self.count_by_filter(filter.clone())?;
         self.shard.update(UpdateOperation::PointOperation(
             PointOperations::DeletePointsByFilter(filter),
@@ -338,6 +360,40 @@ impl VecDb {
         Ok(self
             .shard
             .count(CountRequestBuilder::new().exact(true).build())?)
+    }
+
+    /// Counts records for each string value of a top-level payload field.
+    // ponytail: scans all records; use indexed facets if database size makes this expensive.
+    pub fn count_by_field(&self, key: &str) -> Result<Vec<(String, usize)>> {
+        let mut counts = HashMap::new();
+        let mut offset: Option<PointId> = None;
+        loop {
+            let mut req = ScrollRequestBuilder::new()
+                .limit(256)
+                .with_payload(WithPayloadInterface::Bool(true))
+                .with_vector(WithVector::Bool(false));
+            if let Some(o) = offset.take() {
+                req = req.offset(o);
+            }
+            let (records, next) = self.shard.scroll(req.build())?;
+            for record in records {
+                let payload = record
+                    .payload
+                    .map(serde_json::to_value)
+                    .transpose()?
+                    .unwrap_or_default();
+                if let Some(value) = payload.get(key).and_then(serde_json::Value::as_str) {
+                    *counts.entry(value.to_owned()).or_insert(0) += 1;
+                }
+            }
+            match next {
+                Some(o) => offset = Some(o),
+                None => break,
+            }
+        }
+        let mut counts: Vec<_> = counts.into_iter().collect();
+        counts.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        Ok(counts)
     }
 
     /// Adds a keyword index on a metadata field of an existing db (speeds up filters).
