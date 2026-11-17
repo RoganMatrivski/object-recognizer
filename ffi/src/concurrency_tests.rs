@@ -1,6 +1,6 @@
 use crate::RecognizerWrapper;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 fn dummy_image_bytes() -> Vec<u8> {
@@ -20,17 +20,28 @@ fn test_wrapper(name: &str) -> RecognizerWrapper {
     RecognizerWrapper::new_embedded(vecdb_path.to_string_lossy().into_owned()).unwrap()
 }
 
+fn elapsed_ms(wrapper: &RecognizerWrapper, operation: &str) -> f64 {
+    wrapper
+        .get_timings()
+        .into_iter()
+        .find(|timing| timing.name == operation)
+        .unwrap()
+        .elapsed_ms
+}
+
 #[test]
 fn test_search_not_blocked_by_classify() {
     let wrapper = Arc::new(test_wrapper("search-not-blocked"));
     let img = dummy_image_bytes();
 
+    assert_eq!(elapsed_ms(&wrapper, "vector_db_search"), -1.0);
     wrapper
         .vector_db_insert(
             vec![0.0; 1280],
             serde_json::json!({"name": "test"}).to_string(),
         )
         .unwrap();
+    assert!(elapsed_ms(&wrapper, "vector_db_insert") >= 0.0);
 
     let running = Arc::new(AtomicBool::new(true));
     let r_clone = Arc::clone(&running);
@@ -60,6 +71,7 @@ fn test_search_not_blocked_by_classify() {
     classify_handle.join().unwrap();
     let latencies = search_handle.join().unwrap();
 
+    assert!(elapsed_ms(&wrapper, "vector_db_search") >= 0.0);
     let mut sorted = latencies;
     sorted.sort();
     let p99 = sorted[(sorted.len() * 99 / 100).min(sorted.len() - 1)];

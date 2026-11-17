@@ -1,4 +1,5 @@
 pub use boltffi::*;
+use std::{collections::HashMap, time::Instant};
 
 #[cfg(test)]
 mod concurrency_tests;
@@ -18,6 +19,50 @@ pub struct HitDto {
 pub struct KeyCount {
     pub value: String,
     pub count: usize,
+}
+
+#[data]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct OperationTiming {
+    pub name: String,
+    pub elapsed_ms: f64,
+}
+
+const TIMED_OPERATIONS: &[&str] = &[
+    "new",
+    "new_embedded",
+    "new_embedded_lite",
+    "new_embedded_default",
+    "new_default",
+    "segment_subject_raw",
+    "generate_embedding",
+    "vector_db_insert",
+    "vector_db_search",
+    "vector_db_len",
+    "vector_db_count_by",
+    "vector_db_delete_by_id",
+    "vector_db_delete_where",
+    "vector_db_save",
+    "vector_db_export",
+    "vector_db_import",
+    "vector_db_clear",
+    "add_training_sample",
+    "classify_image",
+];
+
+struct TimingGuard<'a> {
+    timings: &'a parking_lot::Mutex<HashMap<&'static str, f64>>,
+    operation: &'static str,
+    started: Instant,
+}
+
+impl Drop for TimingGuard<'_> {
+    fn drop(&mut self) {
+        self.timings.lock().insert(
+            self.operation,
+            self.started.elapsed().as_secs_f64() * 1000.0,
+        );
+    }
 }
 
 #[error]
@@ -76,61 +121,95 @@ pub struct RecognizerWrapper {
     extractor: parking_lot::Mutex<object_recognizer::feature_extraction::FeatureExtractor>,
     vecdb: object_recognizer::vecdb::VecDb,
     _env: ort::environment::Environment,
+    timings: parking_lot::Mutex<HashMap<&'static str, f64>>,
 }
 
 fn assert_send_sync<T: Send + Sync>() {}
 
 #[export]
 impl RecognizerWrapper {
-    fn from_recognizer(rec: object_recognizer::Recognizer) -> Self {
+    fn from_recognizer(
+        rec: object_recognizer::Recognizer,
+        operation: &'static str,
+        started: Instant,
+    ) -> Self {
         let (seg, extractor, vecdb, _env) = rec.into_parts();
+        let mut timings: HashMap<_, _> =
+            TIMED_OPERATIONS.iter().map(|&name| (name, -1.0)).collect();
+        timings.insert(operation, started.elapsed().as_secs_f64() * 1000.0);
         Self {
             seg: parking_lot::Mutex::new(seg),
             extractor: parking_lot::Mutex::new(extractor),
             vecdb,
             _env,
+            timings: parking_lot::Mutex::new(timings),
         }
     }
 
     pub fn new(segmenter_model_path: String, vecdb_path: String) -> Result<Self, RecognizerError> {
+        let started = Instant::now();
         assert_send_sync::<RecognizerWrapper>();
         let rec = object_recognizer::Recognizer::new(segmenter_model_path, vecdb_path)
             .map_err(RecognizerError::initialization)?;
-        Ok(Self::from_recognizer(rec))
+        Ok(Self::from_recognizer(rec, "new", started))
     }
 
     pub fn new_embedded(vecdb_path: String) -> Result<Self, RecognizerError> {
+        let started = Instant::now();
         assert_send_sync::<RecognizerWrapper>();
         let rec = object_recognizer::Recognizer::new_embedded(vecdb_path)
             .map_err(RecognizerError::initialization)?;
-        Ok(Self::from_recognizer(rec))
+        Ok(Self::from_recognizer(rec, "new_embedded", started))
     }
 
     pub fn new_embedded_lite(vecdb_path: String) -> Result<Self, RecognizerError> {
+        let started = Instant::now();
         assert_send_sync::<RecognizerWrapper>();
         let rec = object_recognizer::Recognizer::new_embedded_lite(vecdb_path)
             .map_err(RecognizerError::initialization)?;
-        Ok(Self::from_recognizer(rec))
+        Ok(Self::from_recognizer(rec, "new_embedded_lite", started))
     }
 
     pub fn new_embedded_default() -> Result<Self, RecognizerError> {
+        let started = Instant::now();
         assert_send_sync::<RecognizerWrapper>();
         let rec = object_recognizer::Recognizer::new_embedded_default()
             .map_err(RecognizerError::initialization)?;
-        Ok(Self::from_recognizer(rec))
+        Ok(Self::from_recognizer(rec, "new_embedded_default", started))
     }
 
     pub fn new_default(segmenter_model_path: String) -> Result<Self, RecognizerError> {
+        let started = Instant::now();
         assert_send_sync::<RecognizerWrapper>();
         let rec = object_recognizer::Recognizer::new_default(segmenter_model_path)
             .map_err(RecognizerError::initialization)?;
-        Ok(Self::from_recognizer(rec))
+        Ok(Self::from_recognizer(rec, "new_default", started))
+    }
+
+    fn start_timing(&self, operation: &'static str) -> TimingGuard<'_> {
+        TimingGuard {
+            timings: &self.timings,
+            operation,
+            started: Instant::now(),
+        }
+    }
+
+    pub fn get_timings(&self) -> Vec<OperationTiming> {
+        let timings = self.timings.lock();
+        TIMED_OPERATIONS
+            .iter()
+            .map(|&name| OperationTiming {
+                name: name.to_string(),
+                elapsed_ms: timings[name],
+            })
+            .collect()
     }
 
     pub fn segment_subject_raw(
         &self,
         image_bytes: Vec<u8>,
     ) -> Result<Vec<Vec<u8>>, RecognizerError> {
+        let _timing = self.start_timing("segment_subject_raw");
         let img = image::load_from_memory(&image_bytes).map_err(RecognizerError::image_decode)?;
         let input = object_recognizer::subject_cutout::Segmenter::prepare_input(&img);
         let raw = {
@@ -146,6 +225,7 @@ impl RecognizerWrapper {
     }
 
     pub fn generate_embedding(&self, image_bytes: Vec<u8>) -> Result<Vec<f32>, RecognizerError> {
+        let _timing = self.start_timing("generate_embedding");
         let img = image::load_from_memory(&image_bytes).map_err(RecognizerError::image_decode)?;
         let input = object_recognizer::feature_extraction::FeatureExtractor::prepare_input(&img);
         let mut ext = self.extractor.lock();
@@ -157,6 +237,7 @@ impl RecognizerWrapper {
         vector: Vec<f32>,
         metadata_json: String,
     ) -> Result<u64, RecognizerError> {
+        let _timing = self.start_timing("vector_db_insert");
         let meta: serde_json::Value =
             serde_json::from_str(&metadata_json).map_err(RecognizerError::invalid_metadata)?;
         let ids = self
@@ -171,6 +252,7 @@ impl RecognizerWrapper {
         query_vector: Vec<f32>,
         k: usize,
     ) -> Result<Vec<HitDto>, RecognizerError> {
+        let _timing = self.start_timing("vector_db_search");
         let hits = self
             .vecdb
             .recognize::<serde_json::Value>(query_vector, k, 0.0)
@@ -188,10 +270,12 @@ impl RecognizerWrapper {
     }
 
     pub fn vector_db_len(&self) -> Result<usize, RecognizerError> {
+        let _timing = self.start_timing("vector_db_len");
         self.vecdb.count().map_err(RecognizerError::vector_db)
     }
 
     pub fn vector_db_count_by(&self, key: String) -> Result<Vec<KeyCount>, RecognizerError> {
+        let _timing = self.start_timing("vector_db_count_by");
         self.vecdb
             .count_by_field(&key)
             .map(|counts| {
@@ -204,6 +288,7 @@ impl RecognizerWrapper {
     }
 
     pub fn vector_db_delete_by_id(&self, id: u64) -> Result<bool, RecognizerError> {
+        let _timing = self.start_timing("vector_db_delete_by_id");
         self.vecdb
             .delete_by_id(id)
             .map_err(RecognizerError::vector_db)
@@ -214,17 +299,20 @@ impl RecognizerWrapper {
         key: String,
         value: String,
     ) -> Result<usize, RecognizerError> {
+        let _timing = self.start_timing("vector_db_delete_where");
         self.vecdb
             .delete_where(&key, value)
             .map_err(RecognizerError::vector_db)
     }
 
     pub fn vector_db_save(&self, path: String) -> Result<(), RecognizerError> {
+        let _timing = self.start_timing("vector_db_save");
         let _ = path;
         self.vecdb.optimize().map_err(RecognizerError::vector_db)
     }
 
     pub fn vector_db_export(&self, path: String) -> Result<usize, RecognizerError> {
+        let _timing = self.start_timing("vector_db_export");
         let count = self
             .vecdb
             .export(&path)
@@ -233,6 +321,7 @@ impl RecognizerWrapper {
     }
 
     pub fn vector_db_import(&self, path: String, replace: bool) -> Result<usize, RecognizerError> {
+        let _timing = self.start_timing("vector_db_import");
         let mode = if replace {
             object_recognizer::vecdb::ImportMode::Replace
         } else {
@@ -246,6 +335,7 @@ impl RecognizerWrapper {
     }
 
     pub fn vector_db_clear(&self) -> Result<(), RecognizerError> {
+        let _timing = self.start_timing("vector_db_clear");
         self.vecdb.clear().map_err(RecognizerError::vector_db)
     }
 
@@ -254,6 +344,7 @@ impl RecognizerWrapper {
         image_bytes: Vec<u8>,
         metadata_json: String,
     ) -> Result<Vec<u64>, RecognizerError> {
+        let _timing = self.start_timing("add_training_sample");
         let img = image::load_from_memory(&image_bytes).map_err(RecognizerError::image_decode)?;
         let meta: serde_json::Value =
             serde_json::from_str(&metadata_json).map_err(RecognizerError::invalid_metadata)?;
@@ -298,6 +389,7 @@ impl RecognizerWrapper {
         top_n: usize,
         min_score: f32,
     ) -> Result<Vec<HitDto>, RecognizerError> {
+        let _timing = self.start_timing("classify_image");
         let img = image::load_from_memory(&image_bytes).map_err(RecognizerError::image_decode)?;
 
         let input = object_recognizer::subject_cutout::Segmenter::prepare_input(&img);

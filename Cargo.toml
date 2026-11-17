@@ -29,6 +29,11 @@ edition = "2024"
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[profile.release]
+opt-level = 3
+debug = 1
+strip = false
+
 [dependencies]
 object-recognizer-feature-extraction = { workspace = true, features = ["embed-model"] }
 object-recognizer-subject-cutout = { workspace = true, features = ["fast-resize"] }
