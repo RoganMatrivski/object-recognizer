@@ -1,0 +1,67 @@
+<Window x:Class="ObjectRecognizerApp.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Object Recognizer &amp; Segmenter" Height="700" Width="1100"
+        AllowDrop="True" Drop="Window_Drop">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="200"/>
+        </Grid.RowDefinitions>
+
+        <!-- Top Control Bar -->
+        <Grid Grid.Row="0" Margin="0,0,0,10">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <StackPanel Orientation="Horizontal">
+                <Button x:Name="BtnBrowse" Content="Open Image..." Click="BtnBrowse_Click" Margin="0,0,10,0" Padding="10,5"/>
+                <Button x:Name="BtnCamera" Content="Capture Camera" Click="BtnCamera_Click" Margin="0,0,10,0" Padding="10,5"/>
+                <Button x:Name="BtnBulkAdd" Content="Bulk Add..." Click="BtnBulkAdd_Click" Margin="0,0,10,0" Padding="10,5"/>
+                <Button x:Name="BtnTrain" Content="Add to Training" Click="BtnTrain_Click" Margin="0,0,10,0" Padding="10,5" IsEnabled="False"/>
+                <Button x:Name="BtnExport" Content="Export DB..." Click="BtnExport_Click" Margin="0,0,10,0" Padding="10,5"/>
+                <Button x:Name="BtnImport" Content="Import DB..." Click="BtnImport_Click" Margin="0,0,10,0" Padding="10,5"/>
+                <Button x:Name="BtnPurge" Content="Purge DB" Click="BtnPurge_Click" Margin="0,0,10,0" Padding="10,5" Background="#FFF0F0" Foreground="#D9534F"/>
+                <Button x:Name="BtnSaveSideBySide" Content="Save Side-by-Side..." Click="BtnSaveSideBySide_Click" Margin="0,0,10,0" Padding="10,5" IsEnabled="False"/>
+            </StackPanel>
+            <TextBlock Grid.Row="1" x:Name="TxtStatus" Text="Ready. Drag &amp; drop image or click Open." VerticalAlignment="Center" Foreground="Gray" Margin="0,5,0,0"/>
+        </Grid>
+        <TextBlock Grid.Row="1" x:Name="TxtTimings" TextWrapping="Wrap" Foreground="DarkSlateGray" FontSize="11" Margin="0,0,0,10"/>
+
+        <!-- Middle Image Viewers -->
+        <Grid Grid.Row="2" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Original Image -->
+            <GroupBox Grid.Column="0" Header="Original Image" Margin="0,0,5,0">
+                <Border BorderBrush="LightGray" BorderThickness="1" Background="#F9F9F9">
+                    <Image x:Name="ImgOriginal" Stretch="Uniform"/>
+                </Border>
+            </GroupBox>
+
+            <!-- Extracted Subject -->
+            <GroupBox Grid.Column="1" Header="Extracted Subject (Segmentation)" Margin="5,0,0,0">
+                <Border BorderBrush="LightGray" BorderThickness="1" Background="#F9F9F9">
+                    <Image x:Name="ImgSubject" Stretch="Uniform"/>
+                </Border>
+            </GroupBox>
+        </Grid>
+
+        <!-- Bottom Results Table -->
+        <GroupBox Grid.Row="3" Header="Vector Search Results">
+            <DataGrid x:Name="GridResults" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="80"/>
+                    <DataGridTextColumn Header="Score" Binding="{Binding Score}" Width="100"/>
+                    <DataGridTextColumn Header="Metadata" Binding="{Binding MetadataJson}" Width="*"/>
+                </DataGrid.Columns>
+            </DataGrid>
+        </GroupBox>
+    </Grid>
+</Window>

@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <GeneratePathProperty>true</GeneratePathProperty>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\dist\csharp\BoltFFI.CSharp.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="OpenCvSharp4" Version="4.10.0-20240615" />
+    <PackageReference Include="OpenCvSharp4.WpfExtensions" Version="4.10.0-20240615" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.10.0-20240615" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.31.0" GeneratePathProperty="true" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\dist\csharp\runtimes\win-x64\native\object_recognizer_ffi.dll" Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <!-- Automatically copy onnxruntime.dll to output root -->
+  <Target Name="CopyOnnxRuntimeDll" AfterTargets="Build;Publish">
+    <Copy SourceFiles="$(PkgMicrosoft_ML_OnnxRuntime)\runtimes\win-x64\native\onnxruntime.dll"
+          DestinationFolder="$(OutputPath)"
+          Condition="Exists('$(PkgMicrosoft_ML_OnnxRuntime)\runtimes\win-x64\native\onnxruntime.dll')" />
+  </Target>
+
+</Project>

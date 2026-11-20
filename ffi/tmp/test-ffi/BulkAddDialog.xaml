@@ -1,0 +1,38 @@
+<Window x:Class="ObjectRecognizerApp.BulkAddDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Bulk Add Training Samples" Height="350" Width="500" WindowStartupLocation="CenterOwner">
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Label & SKU inputs -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,10">
+            <Label Content="Label / Object Name:" Padding="0,0,0,3"/>
+            <TextBox x:Name="TxtLabel" Height="25" VerticalContentAlignment="Center"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="1" Margin="0,0,0,10">
+            <Label Content="SKU:" Padding="0,0,0,3"/>
+            <TextBox x:Name="TxtSku" Height="25" VerticalContentAlignment="Center"/>
+        </StackPanel>
+
+        <!-- Images Selection -->
+        <GroupBox Grid.Row="2" Header="Selected Images" Margin="0,0,0,15">
+            <DockPanel>
+                <Button x:Name="BtnSelectImages" Content="Select Images..." Click="BtnSelectImages_Click" DockPanel.Dock="Top" Margin="5" Padding="10,5"/>
+                <ListBox x:Name="ListImages" Margin="5"/>
+            </DockPanel>
+        </GroupBox>
+
+        <!-- Action Buttons -->
+        <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button x:Name="BtnCancel" Content="Cancel" Click="BtnCancel_Click" Width="80" Height="30" Margin="0,0,10,0"/>
+            <Button x:Name="BtnProcess" Content="Bulk Add" Click="BtnProcess_Click" Width="80" Height="30" IsDefault="True"/>
+        </StackPanel>
+    </Grid>
+</Window>
