@@ -1,0 +1,24 @@
+[package]
+name = "test-vecdb"
+version = "0.1.0"
+authors = ["Robin Mauritz <robinmauritzrm@gmail.com>"]
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[target.'cfg(target_env = "musl")'.dependencies]
+mimalloc = "^0.1.52"
+
+[dependencies]
+clap = { version = "^4.6", features = ["derive"] }
+color-eyre = { version = "0.6", features = ["capture-spantrace"] }
+eyre = { version = "0.6" }
+object-recognizer-vecdb = { version = "0.1.0", path = "../../../subcrates/vecdb" }
+rand = "0.10.4"
+tempfile = "3.27.0"
+tracing = "0.1.44"
+tracing-error = "0.2.1"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[profile.dev.package.backtrace]
+opt-level = 3

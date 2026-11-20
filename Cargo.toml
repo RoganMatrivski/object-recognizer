@@ -1,3 +1,51 @@
+[package]
+edition = "2024"
+name = "object_recognizer"
+version = "0.1.0"
+
+[features]
+default = []
+embed-model = ["object-recognizer-feature-extraction/embed-model"]
+embed-u2net = ["object-recognizer-subject-cutout/embed-u2net"]
+embed-u2netp = ["object-recognizer-subject-cutout/embed-u2netp"]
+
+[lib]
+crate-type = [
+    "staticlib",
+    "cdylib",
+    "rlib",
+]
+
+[dependencies]
+anyhow = "1.0"
+boltffi = "0.32.1"
+serde_json = "1.0"
+tracing = "0.1"
+
+[dependencies.image]
+workspace = true
+
+[dependencies.object-recognizer-feature-extraction]
+workspace = true
+features = ["embed-model"]
+
+[dependencies.object-recognizer-subject-cutout]
+workspace = true
+features = ["fast-resize"]
+
+[dependencies.object-recognizer-vecdb]
+workspace = true
+
+[dependencies.ort]
+workspace = true
+
+[dependencies.serde]
+version = "1.0"
+features = ["derive"]
+
+[dependencies.thiserror]
+workspace = true
+
 [workspace]
 members = [
     ".",
@@ -7,54 +55,50 @@ members = [
     "subcrates/subject-cutout",
     "subcrates/vecdb",
     "subcrates/runtime-config",
+    "ffi/tmp/test-vecdb",
 ]
 
 [workspace.dependencies]
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
-imageproc = { version = "0.27", default-features = false }
 ort = "=2.0.0-rc.15"
 thiserror = "1"
 
-object_recognizer = { version = "0.1.0", path = "." }
-object-recognizer-feature-extraction = { version = "0.1.0", path = "subcrates/feature-extraction" }
-object-recognizer-subject-cutout = { version = "0.1.0", path = "subcrates/subject-cutout" }
-object-recognizer-vecdb = { version = "0.1.0", path = "subcrates/vecdb" }
-object-recognizer-runtime-config = { version = "0.1.0", path = "subcrates/runtime-config" }
+[workspace.dependencies.image]
+version = "0.25"
+features = [
+    "jpeg",
+    "png",
+    "webp",
+]
+default-features = false
 
-[package]
-name = "object_recognizer"
+[workspace.dependencies.imageproc]
+version = "0.27"
+default-features = false
+
+[workspace.dependencies.object-recognizer-feature-extraction]
 version = "0.1.0"
-edition = "2024"
+path = "subcrates/feature-extraction"
 
-[lib]
-crate-type = ["staticlib", "cdylib", "rlib"]
+[workspace.dependencies.object-recognizer-runtime-config]
+version = "0.1.0"
+path = "subcrates/runtime-config"
+
+[workspace.dependencies.object-recognizer-subject-cutout]
+version = "0.1.0"
+path = "subcrates/subject-cutout"
+
+[workspace.dependencies.object-recognizer-vecdb]
+version = "0.1.0"
+path = "subcrates/vecdb"
+
+[workspace.dependencies.object_recognizer]
+version = "0.1.0"
+path = "."
+
+[profile.dev]
+opt-level = 3
 
 [profile.release]
 opt-level = 3
 debug = 1
 strip = false
-
-[dependencies]
-object-recognizer-feature-extraction = { workspace = true, features = ["embed-model"] }
-object-recognizer-subject-cutout = { workspace = true, features = ["fast-resize"] }
-object-recognizer-vecdb = { workspace = true }
-ort = { workspace = true }
-thiserror = { workspace = true }
-image = { workspace = true }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-anyhow = "1.0"
-boltffi = "0.32.1"
-tracing = "0.1"
-
-
-
-[features]
-default = []
-# Embed weights in the binary (files must exist at build time):
-embed-u2net = ["object-recognizer-subject-cutout/embed-u2net"]    # models/u2net.onnx
-embed-u2netp = ["object-recognizer-subject-cutout/embed-u2netp"]   # models/u2netp.onnx
-embed-model = ["object-recognizer-feature-extraction/embed-model"]
-
-[profile.dev]
-opt-level = 3       # tract is very slow at opt-level 0
