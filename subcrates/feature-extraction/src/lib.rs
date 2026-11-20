@@ -30,7 +30,12 @@ impl FeatureExtractor {
         let mut builder = Session::builder(env)?
             .with_optimization_level(GraphOptimizationLevel::All)
             .map_err(|e| ExtractionError::OrtBuilder(e.to_string()))?
-            .with_intra_threads(object_recognizer_runtime_config::intra_threads())
+            .with_intra_threads(object_recognizer_runtime_config::embedder_threads())
+            .map_err(|e| ExtractionError::OrtBuilder(e.to_string()))?;
+        builder = builder
+            .with_inter_threads(1)
+            .map_err(|e| ExtractionError::OrtBuilder(e.to_string()))?
+            .with_config_entry("session.intra_op.allow_spinning", "0")
             .map_err(|e| ExtractionError::OrtBuilder(e.to_string()))?;
         let session = commit_fn(&mut builder)?;
         Ok(Self { session })

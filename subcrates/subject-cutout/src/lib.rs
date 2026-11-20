@@ -100,7 +100,12 @@ impl Segmenter {
         let mut builder = Session::builder(env)?
             .with_optimization_level(GraphOptimizationLevel::All)
             .map_err(|e| Error::Builder(e.to_string()))?
-            .with_intra_threads(object_recognizer_runtime_config::intra_threads())
+            .with_intra_threads(object_recognizer_runtime_config::segmenter_threads())
+            .map_err(|e| Error::Builder(e.to_string()))?;
+        builder = builder
+            .with_inter_threads(1)
+            .map_err(|e| Error::Builder(e.to_string()))?
+            .with_config_entry("session.intra_op.allow_spinning", "0")
             .map_err(|e| Error::Builder(e.to_string()))?;
         let session = builder.commit_from_file(path)?;
         Ok(Self { model, session })
@@ -116,7 +121,12 @@ impl Segmenter {
         let mut builder = Session::builder(env)?
             .with_optimization_level(GraphOptimizationLevel::All)
             .map_err(|e| Error::Builder(e.to_string()))?
-            .with_intra_threads(object_recognizer_runtime_config::intra_threads())
+            .with_intra_threads(object_recognizer_runtime_config::segmenter_threads())
+            .map_err(|e| Error::Builder(e.to_string()))?;
+        builder = builder
+            .with_inter_threads(1)
+            .map_err(|e| Error::Builder(e.to_string()))?
+            .with_config_entry("session.intra_op.allow_spinning", "0")
             .map_err(|e| Error::Builder(e.to_string()))?;
         let session = builder.commit_from_memory(bytes)?;
         Ok(Self { model, session })
