@@ -2310,9 +2310,18 @@ dependencies = [
  "image",
  "imageproc",
  "ndarray",
+ "object-recognizer-image-resize",
  "object-recognizer-runtime-config",
  "ort",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "object-recognizer-image-resize"
+version = "0.1.0"
+dependencies = [
+ "fast_image_resize",
+ "image",
 ]
 
 [[package]]
@@ -2326,10 +2335,10 @@ dependencies = [
 name = "object-recognizer-subject-cutout"
 version = "0.1.0"
 dependencies = [
- "fast_image_resize",
  "image",
  "imageproc",
  "jpeg-decoder",
+ "object-recognizer-image-resize",
  "object-recognizer-runtime-config",
  "ort",
  "thiserror 1.0.69",

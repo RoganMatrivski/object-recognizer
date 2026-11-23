@@ -55,6 +55,7 @@ members = [
     "subcrates/subject-cutout",
     "subcrates/vecdb",
     "subcrates/runtime-config",
+    "subcrates/image-resize",
     "ffi/tmp/test-vecdb",
 ]
 
@@ -78,6 +79,10 @@ default-features = false
 [workspace.dependencies.object-recognizer-feature-extraction]
 version = "0.1.0"
 path = "subcrates/feature-extraction"
+
+[workspace.dependencies.object-recognizer-image-resize]
+version = "0.1.0"
+path = "subcrates/image-resize"
 
 [workspace.dependencies.object-recognizer-runtime-config]
 version = "0.1.0"

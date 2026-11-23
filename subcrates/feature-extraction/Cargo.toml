@@ -10,6 +10,7 @@ image = { workspace = true }
 imageproc = { workspace = true }
 ndarray = "0.17"
 object-recognizer-runtime-config = { workspace = true }
+object-recognizer-image-resize = { workspace = true, features = ["fast-resize"] }
 
 [features]
 default = []

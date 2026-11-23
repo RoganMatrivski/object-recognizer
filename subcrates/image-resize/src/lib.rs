@@ -1,10 +1,9 @@
-//! Resize backends.
+//! Resize backends shared by the cutout and feature-extraction crates.
 //!
 //! Default: the `image` crate's scalar resizer.
 //! `fast-resize` feature: SIMD `fast_image_resize` (SSE4.1/AVX2/NEON), same filters.
 //!
-//! The rest of the crate only calls [`rgb`] and [`gray`], so the feature is a pure
-//! drop-in toggle.
+//! Callers only use [`rgb`] and [`gray`], so the feature is a pure drop-in toggle.
 
 use image::{DynamicImage, GrayImage, RgbImage, imageops::FilterType as ImgFilter};
 

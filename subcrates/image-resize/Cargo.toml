@@ -1,0 +1,13 @@
+[package]
+name = "object-recognizer-image-resize"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+image = { workspace = true }
+fast_image_resize = { version = "5", optional = true }
+
+[features]
+default = []
+# SIMD resizing (fast_image_resize) instead of the image crate's scalar resizer.
+fast-resize = ["dep:fast_image_resize"]

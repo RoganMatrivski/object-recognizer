@@ -45,8 +45,12 @@ fn scaled_jpeg(path: &Path, min_side: u16) -> Option<DynamicImage> {
     let (w, h) = dec.scale(req_w, req_h).ok()?;
     let pixels = dec.decode().ok()?;
     match dec.info()?.pixel_format {
-        PixelFormat::RGB24 => RgbImage::from_raw(w as u32, h as u32, pixels).map(DynamicImage::ImageRgb8),
-        PixelFormat::L8 => GrayImage::from_raw(w as u32, h as u32, pixels).map(DynamicImage::ImageLuma8),
+        PixelFormat::RGB24 => {
+            RgbImage::from_raw(w as u32, h as u32, pixels).map(DynamicImage::ImageRgb8)
+        }
+        PixelFormat::L8 => {
+            GrayImage::from_raw(w as u32, h as u32, pixels).map(DynamicImage::ImageLuma8)
+        }
         _ => None, // CMYK, 16-bit: let `image` handle it
     }
 }

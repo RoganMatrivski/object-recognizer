@@ -15,7 +15,6 @@
 //! the compiler flags every call site that is on a slow path.
 
 pub mod decode;
-mod resize;
 pub mod variables;
 
 pub use decode::{open_image, open_image_with};
@@ -27,13 +26,13 @@ use imageproc::{
     morphology::{close, dilate, erode},
     region_labelling::{Connectivity, connected_components},
 };
+use object_recognizer_image_resize::{self as resize, Filter};
 use ort::{
     environment::Environment,
     inputs,
     session::{Session, builder::GraphOptimizationLevel},
     value::Value,
 };
-use resize::Filter;
 use std::{collections::HashSet, path::Path};
 
 use variables::*;

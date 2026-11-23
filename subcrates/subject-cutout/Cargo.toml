@@ -9,7 +9,7 @@ imageproc = { workspace = true }
 ort = { workspace = true }
 thiserror = { workspace = true }
 object-recognizer-runtime-config = { workspace = true }
-fast_image_resize = { version = "5", optional = true }
+object-recognizer-image-resize = { workspace = true }
 jpeg-decoder = { version = "0.3", optional = true }
 tracing = "0.1"
 
@@ -18,6 +18,6 @@ default = []
 embed-u2net = []
 embed-u2netp = []
 # SIMD resizing (fast_image_resize) instead of the image crate's scalar resizer.
-fast-resize = ["dep:fast_image_resize"]
+fast-resize = ["object-recognizer-image-resize/fast-resize"]
 # Decode JPEGs at 1/2, 1/4 or 1/8 size (see variables::JPEG_MIN_SIDE).
 jpeg-scaled = ["dep:jpeg-decoder"]

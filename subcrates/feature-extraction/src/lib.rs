@@ -1,6 +1,6 @@
 mod config;
 
-use image::imageops::FilterType;
+use object_recognizer_image_resize::{self as resize, Filter};
 use ort::session::{Session, builder::GraphOptimizationLevel};
 use ort::value::Tensor;
 use std::path::Path;
@@ -60,7 +60,7 @@ impl FeatureExtractor {
 
     pub fn prepare_input(img: &image::DynamicImage) -> Vec<f32> {
         let (w, h) = (config::MODEL_WIDTH, config::MODEL_HEIGHT);
-        let rgb = img.resize_exact(w, h, FilterType::Triangle).to_rgb8();
+        let rgb = resize::rgb(img, w, h, Filter::Triangle);
 
         let area = (w as usize) * (h as usize);
         let mut data = vec![0.0f32; 1 * 3 * area];
