@@ -328,15 +328,19 @@ impl Segmenter {
         side: Option<u32>,
     ) -> Result<Vec<RgbImage>> {
         let soft = self.mask_small(img)?;
-        Ok(cutouts_from_saliency(img, &soft)?
-            .iter()
-            .map(|c| square_on(c, SQUARE_BG, side))
-            .collect())
+        squares_from_saliency(img, &soft, side)
     }
 }
 
 /// Compute instance cutouts directly from a pre-computed soft saliency mask and the original image.
 pub fn cutouts_from_saliency(img: &DynamicImage, soft: &GrayImage) -> Result<Vec<RgbaImage>> {
+    cutouts_fit(img, soft, None)
+}
+
+/// Per-subject cutouts. With `fit = Some(t)` each crop is scaled so its longer
+/// side is `t` *before* masking, so the mask, edge bleed and squaring run at the
+/// output size instead of photo resolution. `None` keeps photo resolution.
+fn cutouts_fit(img: &DynamicImage, soft: &GrayImage, fit: Option<u32>) -> Result<Vec<RgbaImage>> {
     let (w, h) = (img.width(), img.height());
     let solid = solidify(soft);
     let min_area = (INPUT_SIZE * INPUT_SIZE) / MIN_AREA_DIVISOR;
@@ -370,13 +374,19 @@ pub fn cutouts_from_saliency(img: &DynamicImage, soft: &GrayImage) -> Result<Vec
             continue;
         }
 
-        let crop = img.crop_imm(ox0, oy0, cw, ch);
+        let (tw, th) = fit.map_or((cw, ch), |t| fit_within(cw, ch, t));
+        let crop = if (tw, th) == (cw, ch) {
+            img.crop_imm(ox0, oy0, cw, ch)
+        } else {
+            let region = (ox0, oy0, cw, ch);
+            DynamicImage::ImageRgb8(resize::rgb_region(img, region, tw, th, Filter::CatmullRom))
+        };
         let alpha = instance_alpha(soft, &part);
         let m = image::imageops::crop_imm(&alpha, x0, y0, x1 - x0, y1 - y0).to_image();
-        let mut m = resize::gray(&m, cw, ch, Filter::CatmullRom);
+        let mut m = resize::gray(&m, tw, th, Filter::CatmullRom);
         m.pixels_mut().for_each(|p| p[0] = lut[p[0] as usize]);
         let mut rgba = apply_mask(&crop, &m);
-        bleed_edges(&mut rgba, band_px);
+        bleed_edges(&mut rgba, (band_px * tw).div_ceil(cw).max(1));
         out.push(rgba);
     }
     Ok(out)
@@ -388,10 +398,18 @@ pub fn squares_from_saliency(
     soft: &GrayImage,
     side: Option<u32>,
 ) -> Result<Vec<RgbImage>> {
-    Ok(cutouts_from_saliency(img, soft)?
+    // Cutouts already have their longer side at `side`, so `square_on` only pads.
+    Ok(cutouts_fit(img, soft, side)?
         .iter()
         .map(|c| square_on(c, SQUARE_BG, side))
         .collect())
+}
+
+/// (w, h) scaled so the longer side is `t`, aspect ratio kept, each side >= 1.
+fn fit_within(w: u32, h: u32, t: u32) -> (u32, u32) {
+    let s = w.max(h) as u64;
+    let scale = |v: u32| ((v as u64 * t as u64 + s / 2) / s).max(1) as u32;
+    (scale(w), scale(h))
 }
 
 /// Centre a cutout on a square canvas filled with `bg`, alpha-blending the subject
@@ -787,6 +805,59 @@ mod tests {
         assert_eq!(sq.dimensions(), (8, 8));
         assert_eq!(sq.get_pixel(2, 0).0, [0, 0, 0]); // (0,0) lands at (2,0)
         assert_eq!(square_on(&img, [0, 0, 0], Some(16)).dimensions(), (16, 16));
+    }
+
+    #[test]
+    fn fit_within_keeps_aspect_and_hits_target() {
+        assert_eq!(fit_within(1000, 500, 224), (224, 112));
+        assert_eq!(fit_within(300, 900, 224), (75, 224));
+        assert_eq!(fit_within(10, 10, 224), (224, 224));
+        assert_eq!(fit_within(2000, 1, 224), (224, 1));
+    }
+
+    /// Masking at the output size must look like masking at photo size and then
+    /// shrinking, which is what `squares_from_saliency` used to do.
+    #[test]
+    fn fitted_squares_match_full_res_then_resize() {
+        let (w, h) = (1920, 1080);
+        // Textured photo; soft mask = an off-centre ellipse with a soft rim.
+        let img = DynamicImage::ImageRgb8(RgbImage::from_fn(w, h, |x, y| {
+            Rgb([
+                (x / 7 % 256) as u8,
+                (y / 5 % 256) as u8,
+                ((x + y) / 11 % 256) as u8,
+            ])
+        }));
+        let soft = GrayImage::from_fn(INPUT_SIZE, INPUT_SIZE, |x, y| {
+            let (dx, dy) = ((x as f32 - 150.0) / 60.0, (y as f32 - 110.0) / 40.0);
+            let r = (dx * dx + dy * dy).sqrt();
+            Luma([((1.2 - r) * 5.0).clamp(0.0, 1.0).mul_add(255.0, 0.0) as u8])
+        });
+
+        let t = std::time::Instant::now();
+        let old: Vec<RgbImage> = cutouts_from_saliency(&img, &soft)
+            .unwrap()
+            .iter()
+            .map(|c| square_on(c, SQUARE_BG, Some(224)))
+            .collect();
+        let old_ms = t.elapsed().as_secs_f64() * 1e3;
+        let t = std::time::Instant::now();
+        let new = squares_from_saliency(&img, &soft, Some(224)).unwrap();
+        let new_ms = t.elapsed().as_secs_f64() * 1e3;
+        eprintln!("full-res then resize: {old_ms:.1} ms, fitted: {new_ms:.1} ms");
+
+        assert_eq!(old.len(), 1);
+        assert_eq!(new.len(), 1);
+        assert_eq!(new[0].dimensions(), (224, 224));
+        let diff: u64 = old[0]
+            .as_raw()
+            .iter()
+            .zip(new[0].as_raw())
+            .map(|(a, b)| a.abs_diff(*b) as u64)
+            .sum();
+        let mean = diff as f64 / old[0].as_raw().len() as f64;
+        eprintln!("mean abs diff {mean:.2} grey levels");
+        assert!(mean < 3.0, "fitted squares drift too far: {mean:.2}");
     }
 
     #[test]

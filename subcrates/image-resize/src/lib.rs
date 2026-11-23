@@ -27,11 +27,30 @@ impl Filter {
 
 /// Resize any image to exactly `w` x `h`, returned as RGB8.
 pub fn rgb(img: &DynamicImage, w: u32, h: u32, f: Filter) -> RgbImage {
+    rgb_region(img, (0, 0, img.width(), img.height()), w, h, f)
+}
+
+/// Resize the `(x, y, width, height)` region of `img` to exactly `w` x `h`,
+/// without first copying the region out. The region must lie inside `img`.
+pub fn rgb_region(
+    img: &DynamicImage,
+    region: (u32, u32, u32, u32),
+    w: u32,
+    h: u32,
+    f: Filter,
+) -> RgbImage {
     #[cfg(feature = "fast-resize")]
-    if let Some(out) = fast::rgb(img, w, h, f) {
+    if let Some(out) = fast::rgb(img, region, w, h, f) {
         return out;
     }
-    img.resize_exact(w, h, f.to_image()).to_rgb8()
+    let (x, y, cw, ch) = region;
+    if (x, y, cw, ch) == (0, 0, img.width(), img.height()) {
+        img.resize_exact(w, h, f.to_image()).to_rgb8()
+    } else {
+        img.crop_imm(x, y, cw, ch)
+            .resize_exact(w, h, f.to_image())
+            .to_rgb8()
+    }
 }
 
 /// Resize an 8-bit gray image to exactly `w` x `h`.
@@ -68,7 +87,13 @@ mod fast {
     }
 
     // None = couldn't (zero-sized etc.): caller falls back to the `image` crate.
-    pub fn rgb(img: &DynamicImage, w: u32, h: u32, f: Filter) -> Option<RgbImage> {
+    pub fn rgb(
+        img: &DynamicImage,
+        region: (u32, u32, u32, u32),
+        w: u32,
+        h: u32,
+        f: Filter,
+    ) -> Option<RgbImage> {
         let owned;
         let src_img: &RgbImage = match img {
             DynamicImage::ImageRgb8(i) => i, // borrow, no copy
@@ -77,10 +102,20 @@ mod fast {
                 &owned
             }
         };
-        let src = ImageRef::new(src_img.width(), src_img.height(), src_img.as_raw(), PixelType::U8x3).ok()?;
+        let src = ImageRef::new(
+            src_img.width(),
+            src_img.height(),
+            src_img.as_raw(),
+            PixelType::U8x3,
+        )
+        .ok()?;
         let mut dst = Image::new(w, h, PixelType::U8x3);
+        let (x, y, cw, ch) = region;
+        let opts = ResizeOptions::new()
+            .resize_alg(alg(f))
+            .crop(x as f64, y as f64, cw as f64, ch as f64);
         RESIZER
-            .with(|r| r.borrow_mut().resize(&src, &mut dst, &ResizeOptions::new().resize_alg(alg(f))))
+            .with(|r| r.borrow_mut().resize(&src, &mut dst, &opts))
             .ok()?;
         RgbImage::from_raw(w, h, dst.into_vec())
     }
@@ -89,7 +124,10 @@ mod fast {
         let src = ImageRef::new(img.width(), img.height(), img.as_raw(), PixelType::U8).ok()?;
         let mut dst = Image::new(w, h, PixelType::U8);
         RESIZER
-            .with(|r| r.borrow_mut().resize(&src, &mut dst, &ResizeOptions::new().resize_alg(alg(f))))
+            .with(|r| {
+                r.borrow_mut()
+                    .resize(&src, &mut dst, &ResizeOptions::new().resize_alg(alg(f)))
+            })
             .ok()?;
         GrayImage::from_raw(w, h, dst.into_vec())
     }
@@ -102,14 +140,21 @@ mod tests {
 
     fn gradient_rgb(w: u32, h: u32) -> DynamicImage {
         DynamicImage::ImageRgb8(RgbImage::from_fn(w, h, |x, y| {
-            Rgb([(x * 255 / w) as u8, (y * 255 / h) as u8, ((x + y) * 255 / (w + h)) as u8])
+            Rgb([
+                (x * 255 / w) as u8,
+                (y * 255 / h) as u8,
+                ((x + y) * 255 / (w + h)) as u8,
+            ])
         }))
     }
 
     #[test]
     fn rgb_has_requested_size() {
         for f in [Filter::Triangle, Filter::CatmullRom, Filter::Lanczos3] {
-            assert_eq!(rgb(&gradient_rgb(333, 211), 64, 64, f).dimensions(), (64, 64));
+            assert_eq!(
+                rgb(&gradient_rgb(333, 211), 64, 64, f).dimensions(),
+                (64, 64)
+            );
         }
     }
 
@@ -122,7 +167,10 @@ mod tests {
     #[test]
     fn gray_up_and_down() {
         let g = GrayImage::from_fn(40, 30, |x, _| Luma([(x * 6) as u8]));
-        assert_eq!(gray(&g, 160, 120, Filter::Lanczos3).dimensions(), (160, 120));
+        assert_eq!(
+            gray(&g, 160, 120, Filter::Lanczos3).dimensions(),
+            (160, 120)
+        );
         assert_eq!(gray(&g, 10, 8, Filter::Triangle).dimensions(), (10, 8));
     }
 
@@ -134,8 +182,30 @@ mod tests {
         for f in [Filter::Triangle, Filter::CatmullRom, Filter::Lanczos3] {
             let a = rgb(&src, 320, 320, f);
             let b = src.resize_exact(320, 320, f.to_image()).to_rgb8();
-            let mad: f64 = a.as_raw().iter().zip(b.as_raw()).map(|(x, y)| (*x as f64 - *y as f64).abs()).sum::<f64>() / a.as_raw().len() as f64;
+            let mad: f64 = a
+                .as_raw()
+                .iter()
+                .zip(b.as_raw())
+                .map(|(x, y)| (*x as f64 - *y as f64).abs())
+                .sum::<f64>()
+                / a.as_raw().len() as f64;
             assert!(mad < 1.5, "{f:?}: mean abs diff {mad}");
         }
+    }
+
+    #[test]
+    fn region_matches_crop_then_resize() {
+        let img = gradient_rgb(300, 200);
+        let want = rgb(&img.crop_imm(40, 30, 180, 120), 60, 40, Filter::CatmullRom);
+        let got = rgb_region(&img, (40, 30, 180, 120), 60, 40, Filter::CatmullRom);
+        assert_eq!(got.dimensions(), (60, 40));
+        let diff = want
+            .as_raw()
+            .iter()
+            .zip(got.as_raw())
+            .map(|(a, b)| a.abs_diff(*b) as u32)
+            .max()
+            .unwrap();
+        assert!(diff <= 2, "region resize differs by {diff}");
     }
 }
