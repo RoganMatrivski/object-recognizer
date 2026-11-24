@@ -1,4 +1,4 @@
-use object_recognizer_vecdb::{all_of, any_of, eq, none_of, VecDb, VECTOR_DIM};
+use object_recognizer_vecdb::{VECTOR_DIM, VecDb, all_of, any_of, eq, none_of};
 use serde::Deserialize;
 use serde_json::json;
 use std::path::PathBuf;

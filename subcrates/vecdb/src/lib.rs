@@ -1,16 +1,15 @@
-use anyhow::Result;
-use flate2::{read::GzDecoder, write::GzEncoder, Compression};
+use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use qdrant_edge::*;
 pub use qdrant_edge::{Condition, Filter, Match};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::HashMap,
     fs::{self, File},
     io::{BufRead, BufReader, BufWriter, Write},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
     sync::Mutex,
     sync::RwLock,
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 // ---- Define your schema once, here ----
@@ -26,6 +25,34 @@ const EXPORT_FORMAT: u32 = 1;
 /// any field, but indexed ones are much faster on large dbs. Use `index_field` to add
 /// more to an existing db.
 pub const INDEXED_FIELDS: &[&str] = &["name", "category"];
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("qdrant error: {0}")]
+    Qdrant(#[source] Box<dyn std::error::Error + Send + Sync + 'static>),
+    #[error("invalid payload key '{0}'")]
+    InvalidKey(String),
+    #[error("expected dim {expected}, got {got}")]
+    DimMismatch { expected: usize, got: usize },
+    #[error("empty export file")]
+    EmptyFile,
+    #[error("incompatible export file: {0}")]
+    Incompatible(String),
+    #[error("unsupported point: {0}")]
+    UnsupportedPoint(String),
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+/// qdrant-edge's `OperationError` lives in a private module and can't be named,
+/// so it can't be a `#[from]` source; box it instead.
+fn qdrant(e: impl std::error::Error + Send + Sync + 'static) -> Error {
+    Error::Qdrant(Box::new(e))
+}
 
 // ---- filter helpers: eq("category", "kitchen"), all_of([...]) ----
 
@@ -64,7 +91,7 @@ impl IntoMatch for bool {
 pub fn eq(key: &str, value: impl IntoMatch) -> Result<Condition> {
     let k = key
         .try_into()
-        .map_err(|_| anyhow::anyhow!("invalid payload key '{key}'"))?;
+        .map_err(|_| Error::InvalidKey(key.to_string()))?;
     Ok(Condition::Field(FieldCondition::new_match(
         k,
         value.into_match(),
@@ -98,13 +125,15 @@ pub fn none_of(conds: impl IntoIterator<Item = Condition>) -> Filter {
 fn create_keyword_index(shard: &EdgeShard, key: &str) -> Result<()> {
     let field_name = key
         .try_into()
-        .map_err(|_| anyhow::anyhow!("invalid payload key '{key}'"))?;
-    shard.update(UpdateOperation::FieldIndexOperation(
-        FieldIndexOperations::CreateIndex(CreateIndex {
-            field_name,
-            field_schema: Some(PayloadSchemaType::Keyword.into()),
-        }),
-    ))?;
+        .map_err(|_| Error::InvalidKey(key.to_string()))?;
+    shard
+        .update(UpdateOperation::FieldIndexOperation(
+            FieldIndexOperations::CreateIndex(CreateIndex {
+                field_name,
+                field_schema: Some(PayloadSchemaType::Keyword.into()),
+            }),
+        ))
+        .map_err(qdrant)?;
     Ok(())
 }
 
@@ -153,7 +182,7 @@ impl VecDb {
         let id_file = dir.join("next_id");
 
         let shard = if id_file.exists() {
-            EdgeShard::load(dir, None)?
+            EdgeShard::load(dir, None).map_err(qdrant)?
         } else {
             let config = EdgeConfigBuilder::new()
                 .payload_memory(Memory::Cold)
@@ -164,7 +193,7 @@ impl VecDb {
                         .build(),
                 )
                 .build();
-            let s = EdgeShard::new(dir, config)?;
+            let s = EdgeShard::new(dir, config).map_err(qdrant)?;
             for f in INDEXED_FIELDS {
                 create_keyword_index(&s, f)?;
             }
@@ -254,7 +283,7 @@ impl VecDb {
         if let Some(f) = filter {
             req = req.filter(f);
         }
-        Ok(self.shard.query(req.build())?)
+        self.shard.query(req.build()).map_err(qdrant)
     }
 
     /// Nearest matches above `min_score`. Empty => "unknown object".
@@ -305,22 +334,27 @@ impl VecDb {
     }
 
     fn delete_internal(&self, ids: &[u64]) -> Result<()> {
-        self.shard.update(UpdateOperation::PointOperation(
-            PointOperations::DeletePoints {
-                ids: ids.iter().map(|i| PointId::NumId(*i)).collect(),
-            },
-        ))?;
+        self.shard
+            .update(UpdateOperation::PointOperation(
+                PointOperations::DeletePoints {
+                    ids: ids.iter().map(|i| PointId::NumId(*i)).collect(),
+                },
+            ))
+            .map_err(qdrant)?;
         Ok(())
     }
 
     pub fn delete_by_id(&self, id: u64) -> Result<bool> {
         let _guard = self.write_lock.lock().unwrap();
-        let records = self.shard.retrieve(
-            RetrieveRequestBuilder::new(vec![PointId::NumId(id)])
-                .with_payload(WithPayloadInterface::Bool(false))
-                .with_vector(WithVector::Bool(false))
-                .build(),
-        )?;
+        let records = self
+            .shard
+            .retrieve(
+                RetrieveRequestBuilder::new(vec![PointId::NumId(id)])
+                    .with_payload(WithPayloadInterface::Bool(false))
+                    .with_vector(WithVector::Bool(false))
+                    .build(),
+            )
+            .map_err(qdrant)?;
         if records.is_empty() {
             return Ok(false);
         }
@@ -333,9 +367,11 @@ impl VecDb {
     pub fn delete_by_filter(&self, filter: Filter) -> Result<usize> {
         let _guard = self.write_lock.lock().unwrap();
         let n = self.count_by_filter(filter.clone())?;
-        self.shard.update(UpdateOperation::PointOperation(
-            PointOperations::DeletePointsByFilter(filter),
-        ))?;
+        self.shard
+            .update(UpdateOperation::PointOperation(
+                PointOperations::DeletePointsByFilter(filter),
+            ))
+            .map_err(qdrant)?;
         Ok(n)
     }
 
@@ -347,19 +383,21 @@ impl VecDb {
 
     /// Number of points matching `filter` (exact).
     pub fn count_by_filter(&self, filter: Filter) -> Result<usize> {
-        Ok(self.shard.count(
-            CountRequestBuilder::new()
-                .filter(filter)
-                .exact(true)
-                .build(),
-        )?)
+        self.shard
+            .count(
+                CountRequestBuilder::new()
+                    .filter(filter)
+                    .exact(true)
+                    .build(),
+            )
+            .map_err(qdrant)
     }
 
     /// Total number of points.
     pub fn count(&self) -> Result<usize> {
-        Ok(self
-            .shard
-            .count(CountRequestBuilder::new().exact(true).build())?)
+        self.shard
+            .count(CountRequestBuilder::new().exact(true).build())
+            .map_err(qdrant)
     }
 
     /// Counts records for each string value of a top-level payload field.
@@ -375,7 +413,7 @@ impl VecDb {
             if let Some(o) = offset.take() {
                 req = req.offset(o);
             }
-            let (records, next) = self.shard.scroll(req.build())?;
+            let (records, next) = self.shard.scroll(req.build()).map_err(qdrant)?;
             for record in records {
                 let payload = record
                     .payload
@@ -402,7 +440,7 @@ impl VecDb {
     }
 
     pub fn optimize(&self) -> Result<()> {
-        self.shard.optimize()?;
+        self.shard.optimize().map_err(qdrant)?;
         Ok(())
     }
 
@@ -432,18 +470,30 @@ impl VecDb {
             if let Some(o) = offset.take() {
                 req = req.offset(o);
             }
-            let (records, next) = self.shard.scroll(req.build())?;
+            let (records, next) = self.shard.scroll(req.build()).map_err(qdrant)?;
             for r in records {
                 let id = match r.id {
                     PointId::NumId(n) => n,
-                    other => anyhow::bail!("unsupported non-numeric point id: {other:?}"),
+                    other => {
+                        return Err(Error::UnsupportedPoint(format!(
+                            "unsupported non-numeric point id: {other:?}"
+                        )));
+                    }
                 };
                 let vector = match r.vector {
                     Some(VectorStructInternal::Named(mut m)) => match m.remove(VECTOR_NAME) {
                         Some(VectorInternal::Dense(v)) => v,
-                        _ => anyhow::bail!("point {id} has no dense '{VECTOR_NAME}' vector"),
+                        _ => {
+                            return Err(Error::UnsupportedPoint(format!(
+                                "point {id} has no dense '{VECTOR_NAME}' vector"
+                            )));
+                        }
                     },
-                    _ => anyhow::bail!("point {id} has unexpected vector layout"),
+                    _ => {
+                        return Err(Error::UnsupportedPoint(format!(
+                            "point {id} has unexpected vector layout"
+                        )));
+                    }
                 };
                 let payload = r
                     .payload
@@ -478,32 +528,31 @@ impl VecDb {
     /// Returns the number of points imported.
     pub fn import(&self, path: impl AsRef<Path>, mode: ImportMode) -> Result<usize> {
         let mut lines = BufReader::new(GzDecoder::new(File::open(path)?)).lines();
-        let header: ExportHeader = serde_json::from_str(
-            &lines
-                .next()
-                .ok_or_else(|| anyhow::anyhow!("empty file"))??,
-        )?;
-        anyhow::ensure!(
-            header.format == EXPORT_FORMAT,
-            "unsupported export format {}",
-            header.format
-        );
-        anyhow::ensure!(
-            header.model == EMBEDDING_MODEL,
-            "embedding model mismatch: file '{}' vs local '{}'",
-            header.model,
-            EMBEDDING_MODEL
-        );
-        anyhow::ensure!(
-            header.dim == VECTOR_DIM,
-            "dim mismatch: file {} vs local {VECTOR_DIM}",
-            header.dim
-        );
-        anyhow::ensure!(
-            header.distance == format!("{DISTANCE:?}"),
-            "distance mismatch: file {} vs local {DISTANCE:?}",
-            header.distance
-        );
+        let header: ExportHeader = serde_json::from_str(&lines.next().ok_or(Error::EmptyFile)??)?;
+        if header.format != EXPORT_FORMAT {
+            return Err(Error::Incompatible(format!(
+                "unsupported export format {}",
+                header.format
+            )));
+        }
+        if header.model != EMBEDDING_MODEL {
+            return Err(Error::Incompatible(format!(
+                "embedding model mismatch: file '{}' vs local '{EMBEDDING_MODEL}'",
+                header.model
+            )));
+        }
+        if header.dim != VECTOR_DIM {
+            return Err(Error::Incompatible(format!(
+                "dim mismatch: file {} vs local {VECTOR_DIM}",
+                header.dim
+            )));
+        }
+        if header.distance != format!("{DISTANCE:?}") {
+            return Err(Error::Incompatible(format!(
+                "distance mismatch: file {} vs local {DISTANCE:?}",
+                header.distance
+            )));
+        }
 
         let mut rows = Vec::new();
         for line in lines {
@@ -569,12 +618,14 @@ impl VecDb {
             if let Some(o) = offset.take() {
                 req = req.offset(o);
             }
-            let (records, next) = self.shard.scroll(req.build())?;
+            let (records, next) = self.shard.scroll(req.build()).map_err(qdrant)?;
             let ids: Vec<PointId> = records.into_iter().map(|r| r.id).collect();
             if !ids.is_empty() {
-                self.shard.update(UpdateOperation::PointOperation(
-                    PointOperations::DeletePoints { ids },
-                ))?;
+                self.shard
+                    .update(UpdateOperation::PointOperation(
+                        PointOperations::DeletePoints { ids },
+                    ))
+                    .map_err(qdrant)?;
             }
             match next {
                 Some(o) => offset = Some(o),
@@ -585,9 +636,11 @@ impl VecDb {
     }
 
     fn upsert_points(&self, points: Vec<PointStructPersisted>) -> Result<()> {
-        self.shard.update(UpdateOperation::PointOperation(
-            PointOperations::UpsertPoints(PointInsertOperations::PointsList(points)),
-        ))?;
+        self.shard
+            .update(UpdateOperation::PointOperation(
+                PointOperations::UpsertPoints(PointInsertOperations::PointsList(points)),
+            ))
+            .map_err(qdrant)?;
         Ok(())
     }
 }
@@ -635,10 +688,11 @@ mod tests {
 }
 
 fn check_dim(v: &[f32]) -> Result<()> {
-    anyhow::ensure!(
-        v.len() == VECTOR_DIM,
-        "expected dim {VECTOR_DIM}, got {}",
-        v.len()
-    );
+    if v.len() != VECTOR_DIM {
+        return Err(Error::DimMismatch {
+            expected: VECTOR_DIM,
+            got: v.len(),
+        });
+    }
     Ok(())
 }

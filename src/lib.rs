@@ -13,7 +13,7 @@ pub enum Error {
     #[error("segmenter error: {0}")]
     Segmenter(#[from] object_recognizer_subject_cutout::Error),
     #[error("vecdb error: {0}")]
-    VecDb(#[from] anyhow::Error),
+    VecDb(#[from] object_recognizer_vecdb::Error),
     #[error("image error: {0}")]
     Image(#[from] image::ImageError),
     #[error("io error: {0}")]
