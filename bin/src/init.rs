@@ -7,6 +7,14 @@ pub struct Args {
     /// Verbosity log
     #[arg(short, long, action = clap::ArgAction::Count)]
     pub verbose: u8,
+
+    /// Address to serve the HTTP API on
+    #[arg(short, long, default_value = "127.0.0.1:3000")]
+    pub listen: String,
+
+    /// Vector DB directory (default: the platform data dir)
+    #[arg(long)]
+    pub data_dir: Option<std::path::PathBuf>,
 }
 
 const VERBOSE_LEVELS: &[&str] = &["info", "debug", "trace"];

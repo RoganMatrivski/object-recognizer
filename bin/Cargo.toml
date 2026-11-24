@@ -10,13 +10,22 @@ edition = "2024"
 mimalloc = "^0.1.52"
 
 [dependencies]
+axum = { version = "0.8.9", features = ["multipart"] }
+base64 = "0.23"
 clap = { version = "^4.6", features = ["derive"] }
 color-eyre = { version = "0.6", features = ["capture-spantrace"] }
+directories = "6.0.0"
 eyre = { version = "0.6" }
+serde = { version = "1.0", features = ["derive"] }
 image = { workspace = true }
 object_recognizer = { workspace = true, features = ["embed-u2net", "embed-u2netp", "embed-model"] }
 ort = { workspace = true }
 tempfile = "3.27.0"
+tokio = { version = "1", features = ["rt-multi-thread", "net"] }
 tracing = "0.1.44"
 tracing-error = "0.2.1"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+utoipa = { version = "6", features = ["axum_extras"] }
+utoipa-axum = "0.3"
+utoipa-scalar = { version = "0.4", features = ["axum"] }
+serde_json = "1"
