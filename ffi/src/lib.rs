@@ -101,23 +101,30 @@ impl RecognizerError {
         }
     }
 
-    fn inference(error: impl std::fmt::Display) -> Self {
-        Self::Inference {
-            message: error.to_string(),
-        }
-    }
-
-    fn vector_db(error: impl std::fmt::Display) -> Self {
-        Self::VectorDb {
-            message: error.to_string(),
-        }
-    }
-
     fn serialization(error: impl std::fmt::Display) -> Self {
         Self::Serialization {
             message: error.to_string(),
         }
     }
+}
+
+/// Maps each source error type to its FFI category once, so call sites can use plain `?`.
+/// The message has to be flattened to a `String`: boltffi errors cross the boundary as data.
+macro_rules! from_source {
+    ($($source:ty => $variant:ident),* $(,)?) => {$(
+        impl From<$source> for RecognizerError {
+            fn from(error: $source) -> Self {
+                Self::$variant { message: error.to_string() }
+            }
+        }
+    )*};
+}
+
+from_source! {
+    object_recognizer::vecdb::Error => VectorDb,
+    object_recognizer::subject_cutout::Error => Inference,
+    object_recognizer::feature_extraction::ExtractionError => Inference,
+    image::ImageError => ImageDecode,
 }
 
 #[export]
@@ -257,10 +264,7 @@ impl RecognizerWrapper {
         let _timing = self.start_timing("vector_db_insert");
         let meta: serde_json::Value =
             serde_json::from_str(&metadata_json).map_err(RecognizerError::invalid_metadata)?;
-        let ids = self
-            .vecdb
-            .add_with(std::iter::once((vector, meta)))
-            .map_err(RecognizerError::vector_db)?;
+        let ids = self.vecdb.add_with(std::iter::once((vector, meta)))?;
         Ok(ids[0])
     }
 
@@ -272,34 +276,27 @@ impl RecognizerWrapper {
         let _timing = self.start_timing("vector_db_search");
         let hits = self
             .vecdb
-            .recognize::<serde_json::Value>(query_vector, k, 0.0)
-            .map_err(RecognizerError::vector_db)?;
+            .recognize::<serde_json::Value>(query_vector, k, 0.0)?;
         hit_dtos(hits)
     }
 
     pub fn vector_db_len(&self) -> Result<usize, RecognizerError> {
         let _timing = self.start_timing("vector_db_len");
-        self.vecdb.count().map_err(RecognizerError::vector_db)
+        Ok(self.vecdb.count()?)
     }
 
     pub fn vector_db_count_by(&self, key: String) -> Result<Vec<KeyCount>, RecognizerError> {
         let _timing = self.start_timing("vector_db_count_by");
-        self.vecdb
-            .count_by_field(&key)
-            .map(|counts| {
-                counts
-                    .into_iter()
-                    .map(|(value, count)| KeyCount { value, count })
-                    .collect()
-            })
-            .map_err(RecognizerError::vector_db)
+        let counts = self.vecdb.count_by_field(&key)?;
+        Ok(counts
+            .into_iter()
+            .map(|(value, count)| KeyCount { value, count })
+            .collect())
     }
 
     pub fn vector_db_delete_by_id(&self, id: u64) -> Result<bool, RecognizerError> {
         let _timing = self.start_timing("vector_db_delete_by_id");
-        self.vecdb
-            .delete_by_id(id)
-            .map_err(RecognizerError::vector_db)
+        Ok(self.vecdb.delete_by_id(id)?)
     }
 
     pub fn vector_db_delete_where(
@@ -308,24 +305,18 @@ impl RecognizerWrapper {
         value: String,
     ) -> Result<usize, RecognizerError> {
         let _timing = self.start_timing("vector_db_delete_where");
-        self.vecdb
-            .delete_where(&key, value)
-            .map_err(RecognizerError::vector_db)
+        Ok(self.vecdb.delete_where(&key, value)?)
     }
 
     pub fn vector_db_save(&self, path: String) -> Result<(), RecognizerError> {
         let _timing = self.start_timing("vector_db_save");
         let _ = path;
-        self.vecdb.optimize().map_err(RecognizerError::vector_db)
+        Ok(self.vecdb.optimize()?)
     }
 
     pub fn vector_db_export(&self, path: String) -> Result<usize, RecognizerError> {
         let _timing = self.start_timing("vector_db_export");
-        let count = self
-            .vecdb
-            .export(&path)
-            .map_err(RecognizerError::vector_db)?;
-        Ok(count)
+        Ok(self.vecdb.export(&path)?)
     }
 
     pub fn vector_db_import(&self, path: String, replace: bool) -> Result<usize, RecognizerError> {
@@ -335,16 +326,12 @@ impl RecognizerWrapper {
         } else {
             object_recognizer::vecdb::ImportMode::Merge
         };
-        let count = self
-            .vecdb
-            .import(&path, mode)
-            .map_err(RecognizerError::vector_db)?;
-        Ok(count)
+        Ok(self.vecdb.import(&path, mode)?)
     }
 
     pub fn vector_db_clear(&self) -> Result<(), RecognizerError> {
         let _timing = self.start_timing("vector_db_clear");
-        self.vecdb.clear().map_err(RecognizerError::vector_db)
+        Ok(self.vecdb.clear()?)
     }
 
     pub fn add_training_sample(
@@ -407,21 +394,14 @@ impl RecognizerWrapper {
     fn cutouts(&self, img: &DynamicImage) -> Result<Vec<RgbImage>, RecognizerError> {
         use object_recognizer::subject_cutout::{Segmenter, squares_from_saliency};
         let input = Segmenter::prepare_input(img);
-        let raw = self
-            .seg
-            .lock()
-            .run_raw(input)
-            .map_err(RecognizerError::inference)?;
-        let soft = Segmenter::saliency_from_raw(&raw).map_err(RecognizerError::inference)?;
-        squares_from_saliency(img, &soft, Some(224)).map_err(RecognizerError::inference)
+        let raw = self.seg.lock().run_raw(input)?;
+        let soft = Segmenter::saliency_from_raw(&raw)?;
+        Ok(squares_from_saliency(img, &soft, Some(224))?)
     }
 
     fn embed(&self, img: &DynamicImage) -> Result<Vec<f32>, RecognizerError> {
         let input = object_recognizer::feature_extraction::FeatureExtractor::prepare_input(img);
-        self.extractor
-            .lock()
-            .run(input)
-            .map_err(RecognizerError::inference)
+        Ok(self.extractor.lock().run(input)?)
     }
 
     fn add_sample(
@@ -439,9 +419,9 @@ impl RecognizerWrapper {
         if embeddings.is_empty() {
             return Err(RecognizerError::NoSubjectFound);
         }
-        self.vecdb
-            .add_with(embeddings.into_iter().map(|emb| (emb, meta.clone())))
-            .map_err(RecognizerError::vector_db)
+        Ok(self
+            .vecdb
+            .add_with(embeddings.into_iter().map(|emb| (emb, meta.clone())))?)
     }
 
     fn classify(
@@ -455,8 +435,7 @@ impl RecognizerWrapper {
             let embedding = self.embed(&DynamicImage::ImageRgb8(cutout))?;
             let hits = self
                 .vecdb
-                .recognize::<serde_json::Value>(embedding, top_n, min_score)
-                .map_err(RecognizerError::vector_db)?;
+                .recognize::<serde_json::Value>(embedding, top_n, min_score)?;
             best_hits.extend(hits);
         }
         hit_dtos(object_recognizer::merge_hits(best_hits, top_n))
@@ -479,7 +458,7 @@ fn hit_dtos(
 }
 
 fn decode(image_bytes: &[u8]) -> Result<DynamicImage, RecognizerError> {
-    image::load_from_memory(image_bytes).map_err(RecognizerError::image_decode)
+    Ok(image::load_from_memory(image_bytes)?)
 }
 
 /// RGB image from BGR24 pixels laid out like a .NET `Bitmap` locked as
