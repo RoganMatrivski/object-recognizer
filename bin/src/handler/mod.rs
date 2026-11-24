@@ -10,6 +10,7 @@ mod common;
 mod cutout;
 mod embedding;
 mod error;
+mod health;
 mod pipeline;
 mod vecdb;
 
@@ -43,6 +44,7 @@ pub(super) struct HandlerState {
     tags(
         (name = cutout::TAG, description = "Subject segmentation and cutouts"),
         (name = embedding::TAG, description = "Image feature vectors"),
+        (name = health::TAG, description = "Liveness check"),
         (name = pipeline::TAG, description = "Several models chained in one request"),
         (name = vecdb::TAG, description = "Manual vector database access"),
     )
@@ -61,6 +63,7 @@ pub fn get_router(vecdb_dir: impl AsRef<std::path::Path>) -> eyre::Result<Router
     let (router, api) = OpenApiRouter::with_openapi(ApiDoc::openapi())
         .merge(cutout::router())
         .merge(embedding::router())
+        .merge(health::router())
         .merge(pipeline::router())
         .merge(vecdb::router())
         .split_for_parts();
