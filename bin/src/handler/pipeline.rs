@@ -5,13 +5,14 @@ use axum::{
     extract::{Multipart, Query, State},
 };
 use image::DynamicImage;
+use std::time::Instant;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
 use super::{
     HandlerState,
-    common::{self, ImageUpload},
+    common::{self, ImageUpload, ServerTiming},
     cutout, embedding,
     error::{ApiError, ApiResult},
 };
@@ -75,27 +76,47 @@ async fn cutout_embed(
     State(state): State<HandlerState>,
     Query(params): Query<CutoutEmbedParams>,
     mut multipart: Multipart,
-) -> ApiResult<Json<CutoutEmbedResponse>> {
+) -> ApiResult<(
+    [(axum::http::HeaderName, String); 1],
+    Json<CutoutEmbedResponse>,
+)> {
     if params.side == 0 {
         return Err(ApiError::bad_request("`side` must be at least 1"));
     }
+    let start = Instant::now();
+    // Time spent receiving the body: from the server's side, how long the upload took
+    // after the request headers arrived.
     let bytes = common::read_image_field(&mut multipart).await?;
+    let recv = start.elapsed();
 
-    let subjects = common::blocking(move || {
-        let img = common::decode_image(&bytes)?;
-        // The segmenter lock is released here, before any embedding runs.
-        let squares = cutout::subject_squares(&state, &img, Some(params.side))?;
+    let (subjects, mut timing) = common::blocking(move || {
+        let mut timing = ServerTiming::default();
+        timing.add("recv", recv);
+        let img = timing.time("decode", || common::decode_image(&bytes))?;
+        // Includes waiting for the segmenter lock if another request holds it.
+        // The lock is released here, before any embedding runs.
+        let squares = timing.time("cutout", || {
+            cutout::subject_squares(&state, &img, Some(params.side))
+        })?;
 
-        squares
+        let subjects = squares
             .into_iter()
             .map(|sq| {
-                let image = params.images.then(|| common::png_base64(&sq)).transpose()?;
-                let embedding = embedding::embed(&state, &DynamicImage::ImageRgb8(sq))?;
+                let image = if params.images {
+                    Some(timing.time("encode", || common::png_base64(&sq))?)
+                } else {
+                    None
+                };
+                let embedding = timing.time("embed", || {
+                    embedding::embed(&state, &DynamicImage::ImageRgb8(sq))
+                })?;
                 Ok(Subject { embedding, image })
             })
-            .collect()
+            .collect::<ApiResult<Vec<_>>>()?;
+        Ok((subjects, timing))
     })
     .await?;
 
-    Ok(Json(CutoutEmbedResponse { subjects }))
+    timing.add("total", start.elapsed());
+    Ok((timing.header(), Json(CutoutEmbedResponse { subjects })))
 }

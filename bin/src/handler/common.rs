@@ -3,13 +3,14 @@
 use axum::{
     body::Bytes,
     extract::{Multipart, multipart::MultipartError},
-    http::StatusCode,
+    http::{HeaderName, StatusCode},
 };
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
 use image::{DynamicImage, RgbImage};
 use std::{
     io::Cursor,
     sync::{Mutex, MutexGuard},
+    time::{Duration, Instant},
 };
 use utoipa::ToSchema;
 
@@ -73,6 +74,42 @@ pub fn png_base64(img: &RgbImage) -> ApiResult<String> {
     img.write_to(&mut buf, image::ImageFormat::Png)
         .map_err(ApiError::internal)?;
     Ok(B64.encode(buf.into_inner()))
+}
+
+/// Named durations for a `Server-Timing` response header, so clients can tell
+/// server time from network time.
+#[derive(Default)]
+pub struct ServerTiming {
+    entries: Vec<(&'static str, Duration)>,
+}
+
+impl ServerTiming {
+    /// Record `d` under `name`. Repeated names are summed.
+    pub fn add(&mut self, name: &'static str, d: Duration) {
+        match self.entries.iter_mut().find(|(n, _)| *n == name) {
+            Some((_, total)) => *total += d,
+            None => self.entries.push((name, d)),
+        }
+    }
+
+    /// Run `f` and record how long it took under `name`.
+    pub fn time<T>(&mut self, name: &'static str, f: impl FnOnce() -> T) -> T {
+        let start = Instant::now();
+        let out = f();
+        self.add(name, start.elapsed());
+        out
+    }
+
+    /// `server-timing: recv;dur=12.3, decode;dur=4.5, ...` (milliseconds).
+    pub fn header(&self) -> [(HeaderName, String); 1] {
+        let value = self
+            .entries
+            .iter()
+            .map(|(name, d)| format!("{name};dur={:.1}", d.as_secs_f64() * 1000.0))
+            .collect::<Vec<_>>()
+            .join(", ");
+        [(HeaderName::from_static("server-timing"), value)]
+    }
 }
 
 /// Lock a shared model, mapping a poisoned mutex to a 500.
