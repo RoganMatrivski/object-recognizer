@@ -1,0 +1,17 @@
+.git
+.delta
+.cargo
+target
+**/target
+docs
+bin/tmp
+bin/testdata
+bin/.devcontainer
+ffi/dist
+ffi/tmp/test-ffi
+**/*.env
+
+# Models that are not embedded into the binary
+subcrates/subject-cutout/models/u2net.onnx
+subcrates/subject-cutout/models/u2net_int8.onnx
+subcrates/feature-extraction/model/mobilenetv3_embedding.onnx
